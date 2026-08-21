@@ -15,3 +15,6 @@ Truy vấn 3 tháng lịch sử tiêu thụ
 Tích hợp Google Gemini hoặc OpenAI (đọc từ .env)
 Tự động phân loại mức cảnh báo: Bình thường / Cao / Nguy hiểm
 Lưu kết quả vào CSDL
+vào xem các API :http://localhost:8000/docs.
+vào xem UI :http://localhost:8000.
+khởi động server thì chạy: python -m uvicorn main:app --reload (trỏ vào thư mục rồi chạy).
