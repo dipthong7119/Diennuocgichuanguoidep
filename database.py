@@ -73,6 +73,15 @@ class PhanTichAI(Base):
     MucDoCanhBao      = Column(String, nullable=False)  # 'Bình thường' | 'Cao' | 'Nguy hiểm'
 
 
+class NguoiDung(Base):
+    """Tài khoản người dùng để đăng nhập hệ thống."""
+    __tablename__ = "NguoiDung"
+
+    Username      = Column(String, primary_key=True, index=True)
+    PasswordHash  = Column(String, nullable=False)
+    Role          = Column(String, nullable=False, default="user")  # 'admin' | 'user'
+
+
 # ── Dependency ────────────────────────────────────────────────────────────────
 
 def get_db() -> Generator[Session, None, None]:
