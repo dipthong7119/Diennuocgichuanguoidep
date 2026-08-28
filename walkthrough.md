@@ -4,16 +4,31 @@ Hệ thống đã được cài đặt hoàn tất các thư viện cần thiế
 
 ---
 
-## 🌐 1. Địa chỉ truy cập & Kiểm thử
+## 🌐 1. Cách chạy hệ thống
 
-### Trên máy tính (PC):
-- **Giao diện Web App:** [http://localhost:8000](http://localhost:8000)
-- **Tài liệu API Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
+### Cách 1: Chạy trực tiếp toàn bộ hệ thống qua Backend `main.py` (Khuyên dùng)
+Giao diện React hiện đại (trong `frontend/`) đã được build sẵn vào `frontend/dist`. Khi chạy `main.py`, FastAPI sẽ tự động nạp giao diện React Zalo Mini App:
 
-### Trên điện thoại (Android / iOS):
-- Đảm bảo điện thoại kết nối **chung mạng Wi-Fi** với PC.
-- Mở trình duyệt Chrome/Safari trên điện thoại và truy cập:
-  **`http://192.168.1.19:8000`**
+```bash
+# Chạy trực tiếp file main.py
+py main.py
+```
+- **Giao diện React Zalo Mini App:** [http://127.0.0.1:8000](http://127.0.0.1:8000)
+- **Tài liệu Swagger API:** [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+### Cách 2: Chạy chế độ phát triển Frontend riêng (Vite Dev Server)
+Nếu bạn muốn chỉnh sửa code React và xem thay đổi ngay lập tức (Hot Reload):
+
+```bash
+cd frontend
+npm run dev
+```
+- **Giao diện Dev:** [http://localhost:5173](http://localhost:5173) (tự động proxy API sang `http://127.0.0.1:8000`)
+- **Build lại bản mới cho `main.py` sau khi sửa code:**
+  ```bash
+  cd frontend
+  npm run build
+  ```
 
 ---
 

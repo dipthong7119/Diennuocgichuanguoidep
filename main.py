@@ -51,37 +51,19 @@ app.include_router(chi_so.router)
 app.include_router(ai_insight.router)
 app.include_router(thong_ke.router)
 
-# ── Serve Frontend (từ folder frontend/dist sau khi build) ───────────────────
-BASE_DIR = os.path.dirname(__file__)
-FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
+# ── Serve Static Files (CSS, JS) ─────────────────────────────────────────────
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-if os.path.isdir(FRONTEND_DIST):
-    # Serve assets (JS, CSS, images...) tại /assets
-    assets_dir = os.path.join(FRONTEND_DIST, "assets")
-    if os.path.isdir(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
-
-    # Serve toàn bộ dist (bao gồm các file tĩnh khác)
-    app.mount("/dist", StaticFiles(directory=FRONTEND_DIST), name="dist")
-
-# ── Route / → trả về index.html từ frontend/dist ────────────────────────────
+# ── Serve Frontend HTML ──────────────────────────────────────────────────────
 @app.get("/", tags=["Frontend"], summary="Trang chủ giao diện", include_in_schema=False)
 def serve_frontend():
-    index_path = os.path.join(FRONTEND_DIST, "index.html")
+    index_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.isfile(index_path):
         return FileResponse(index_path)
     return {
         "status": "ok",
-        "message": "Hệ thống Quản lý Hóa đơn Điện nước đang hoạt động. "
-                   "Chạy 'npm run build' trong thư mục frontend/ để build giao diện.",
+        "message": "Hệ thống Quản lý Hóa đơn Điện nước đang hoạt động",
         "docs": "/docs",
     }
-
-# ── Catch-all: trả index.html cho SPA routing ───────────────────────────────
-@app.get("/{full_path:path}", tags=["Frontend"], include_in_schema=False)
-def spa_fallback(full_path: str):
-    """Fallback cho React Router — mọi route không khớp API đều trả index.html."""
-    index_path = os.path.join(FRONTEND_DIST, "index.html")
-    if os.path.isfile(index_path):
-        return FileResponse(index_path)
-    return {"message": "Frontend chưa được build. Chạy 'npm run build' trong frontend/"}
