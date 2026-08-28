@@ -51,19 +51,41 @@ app.include_router(chi_so.router)
 app.include_router(ai_insight.router)
 app.include_router(thong_ke.router)
 
-# ── Serve Static Files (CSS, JS) ─────────────────────────────────────────────
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# ── Serve React Frontend (dist) ───────────────────────────────────────────────
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
-# ── Serve Frontend HTML ──────────────────────────────────────────────────────
-@app.get("/", tags=["Frontend"], summary="Trang chủ giao diện", include_in_schema=False)
-def serve_frontend():
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.isfile(index_path):
-        return FileResponse(index_path)
+# Mount /assets from frontend/dist (React bundle: JS, CSS, SVG)
+if os.path.isdir(FRONTEND_DIST):
+    assets_dir = os.path.join(FRONTEND_DIST, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+# ── Serve Frontend SPA / Index ───────────────────────────────────────────────
+@app.get("/{full_path:path}", tags=["Frontend"], summary="Giao diện Frontend", include_in_schema=False)
+def serve_frontend(full_path: str = ""):
+    if os.path.isdir(FRONTEND_DIST):
+        target_file = os.path.join(FRONTEND_DIST, full_path)
+        if full_path and os.path.isfile(target_file):
+            return FileResponse(target_file)
+        
+        react_index = os.path.join(FRONTEND_DIST, "index.html")
+        if os.path.isfile(react_index):
+            return FileResponse(react_index)
+
     return {
         "status": "ok",
-        "message": "Hệ thống Quản lý Hóa đơn Điện nước đang hoạt động",
+        "message": "Hệ thống Quản lý Hóa đơn Điện nước đang hoạt động. Vui lòng chạy 'npm run build' trong folder frontend.",
         "docs": "/docs",
     }
+
+
+# ── Chạy trực tiếp qua: python main.py ─────────────────────────────────────────
+if __name__ == "__main__":
+    import uvicorn
+    print("\n" + "=" * 60)
+    print("🚀 Đang khởi chạy Server Hệ thống Quản lý Điện Nước:")
+    print("👉 Giao diện Web/Mini App: http://127.0.0.1:8000")
+    print("👉 Tài liệu Swagger API:   http://127.0.0.1:8000/docs")
+    print("=" * 60 + "\n")
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+
