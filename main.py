@@ -51,12 +51,15 @@ app.include_router(chi_so.router)
 app.include_router(ai_insight.router)
 app.include_router(thong_ke.router)
 
-# ── Serve Static Files (CSS, JS) ─────────────────────────────────────────────
+# ── Serve Static Files (CSS, JS, Assets từ Vite build) ───────────────────────
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+    # Mount thư mục assets (JS/CSS chunks của Vite)
+    assets_dir = os.path.join(STATIC_DIR, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-# ── Serve Frontend HTML ──────────────────────────────────────────────────────
+# ── Serve Frontend HTML (catch-all để React Router hoạt động) ─────────────────
 @app.get("/", tags=["Frontend"], summary="Trang chủ giao diện", include_in_schema=False)
 def serve_frontend():
     index_path = os.path.join(STATIC_DIR, "index.html")
@@ -67,3 +70,11 @@ def serve_frontend():
         "message": "Hệ thống Quản lý Hóa đơn Điện nước đang hoạt động",
         "docs": "/docs",
     }
+
+@app.get("/{full_path:path}", include_in_schema=False)
+def serve_spa(full_path: str):
+    """Catch-all route — trả về index.html để React Router tự xử lý."""
+    index_path = os.path.join(STATIC_DIR, "index.html")
+    if os.path.isfile(index_path):
+        return FileResponse(index_path)
+    return {"status": "ok", "message": "API đang chạy", "docs": "/docs"}
