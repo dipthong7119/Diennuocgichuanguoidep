@@ -18,3 +18,6 @@ Lưu kết quả vào CSDL
 vào xem các API :http://localhost:8000/docs.
 vào xem UI :http://localhost:8000.
 khởi động server thì chạy: python -m uvicorn main:app --reload (trỏ vào thư mục rồi chạy).
+chạy giao diện frontend (dev): cd frontend → npm install → npm run dev → vào http://localhost:5173/
+build frontend để dùng với FastAPI: cd frontend → npm run build → sau đó chạy backend, UI có tại http://localhost:8000/
+
