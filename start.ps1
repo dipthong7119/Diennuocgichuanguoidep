@@ -7,7 +7,7 @@ $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FRONTEND = Join-Path $ROOT "frontend"
 $STATIC   = Join-Path $ROOT "static"
 
-Write-Host ""
+Write-Host "" 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  HE THONG QUAN LY HOA DON DIEN NUOC  " -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
