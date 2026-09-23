@@ -1,18 +1,20 @@
-import { LayoutDashboard, ClipboardEdit, Receipt } from 'lucide-react';
+import { LayoutDashboard, ClipboardEdit, Receipt, Eye } from 'lucide-react';
 import type { TabId } from '../types';
 
 interface BottomNavProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  userRole?: string;
 }
 
-const tabs: { id: TabId; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-  { id: 'meter', label: 'Nhập số', icon: ClipboardEdit },
-  { id: 'bill', label: 'Hóa đơn', icon: Receipt },
-];
 
-export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
+export default function BottomNav({ activeTab, onTabChange, userRole = 'admin' }: BottomNavProps) {
+  const isAdmin = userRole === 'admin';
+  const tabs: { id: TabId; label: string; icon: typeof LayoutDashboard }[] = [
+    { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
+    { id: 'meter', label: isAdmin ? 'Nhập số' : 'Chỉ số', icon: isAdmin ? ClipboardEdit : Eye },
+    { id: 'bill', label: 'Hóa đơn', icon: Receipt },
+  ];
   return (
     <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 z-50">
       <div className="flex items-center justify-around py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">

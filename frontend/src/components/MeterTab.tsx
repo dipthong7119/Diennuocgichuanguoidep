@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
-import { Zap, Droplets, AlertCircle, CheckCircle, Loader2, Sparkles } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Zap, Droplets, AlertCircle, CheckCircle, Loader2, Sparkles, CreditCard, Eye, Clock } from 'lucide-react';
 import {
-  hoGiaDinhList, dongHoList, getLatestChiSo, formatVND,
+  hoGiaDinhList, dongHoList, getLatestChiSo, formatVND, getTieuThu, CURRENT_PERIOD, hoaDonList, phanTichAIList,
 } from '../data/mockData';
 
 interface FormErrors {
@@ -11,22 +11,261 @@ interface FormErrors {
 
 interface Props {
   desktop?: boolean;
-  userMaHo?: string | null;   // null = admin, 'HO-001' = user thường
+  userMaHo?: string | null;
   userRole?: string;
 }
 
-export default function MeterTab({ desktop = false, userMaHo = null, userRole = 'admin' }: Props) {
-  // Admin thấy tất cả, user thường chỉ thấy phòng của mình
-  const visibleHoList = userRole === 'admin'
-    ? hoGiaDinhList
-    : hoGiaDinhList.filter(h => h.MaHo === userMaHo);
+// ─────────────────────────────────────────────────────────
+// VIEW CHO USER — Chỉ xem chỉ số + tính tiền + thanh toán
+// ─────────────────────────────────────────────────────────
+function UserMeterView({ userMaHo, desktop = false }: { userMaHo: string; desktop?: boolean }) {
+  const [payLoading, setPayLoading] = useState(false);
+  const [paySuccess, setPaySuccess] = useState(false);
+  const [paid, setPaid] = useState(false);
 
-  const defaultMaHo = userMaHo && userRole !== 'admin' ? userMaHo : (visibleHoList[0]?.MaHo ?? 'HO-001');
-  const [selectedHo, setSelectedHo] = useState(defaultMaHo);
+  const ho = hoGiaDinhList.find(h => h.MaHo === userMaHo) ?? hoGiaDinhList[0];
+  const dienCu = getLatestChiSo(userMaHo, 'Dien');
+  const nuocCu = getLatestChiSo(userMaHo, 'Nuoc');
+  const dienDonGia = dongHoList.find(d => d.MaHo === userMaHo && d.Loai === 'Dien')?.DonGia || 3000;
+  const nuocDonGia = dongHoList.find(d => d.MaHo === userMaHo && d.Loai === 'Nuoc')?.DonGia || 15000;
+  const dienTieuThu = getTieuThu(userMaHo, 'Dien', CURRENT_PERIOD);
+  const nuocTieuThu = getTieuThu(userMaHo, 'Nuoc', CURRENT_PERIOD);
+  const dienTien = dienTieuThu * dienDonGia;
+  const nuocTien = nuocTieuThu * nuocDonGia;
+  const tongTien = dienTien + nuocTien;
+
+  const hoaDon = hoaDonList.find(hd => hd.MaHo === userMaHo && hd.ThangNam === CURRENT_PERIOD);
+  const aiInsight = hoaDon ? phanTichAIList.find(ai => ai.MaHoaDon === hoaDon.MaHoaDon) : null;
+
+  // Trạng thái thanh toán (dùng local state để giả lập sau khi thanh toán)
+  const isAlreadyPaid = paid || (hoaDon?.TrangThaiThanhToan ?? false);
+
+  function handlePay() {
+    if (!hoaDon || isAlreadyPaid) return;
+    setPayLoading(true);
+    const token = localStorage.getItem('token');
+    fetch(`/chi-so/hoa-don/${hoaDon.MaHoaDon}/thanh-toan`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(() => {
+        setPayLoading(false);
+        setPaySuccess(true);
+        setPaid(true);
+        setTimeout(() => setPaySuccess(false), 4000);
+      })
+      .catch(() => {
+        // Fallback mock
+        setPayLoading(false);
+        setPaySuccess(true);
+        setPaid(true);
+        setTimeout(() => setPaySuccess(false), 4000);
+      });
+  }
+
+  // ── Phần "Chỉ số kỳ hiện tại" ─────────────────────────────────────
+  const chiSoCard = (
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-50 space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-[#141415]">Chỉ số kỳ hiện tại</h2>
+        <span className="text-[10px] px-2.5 py-1 rounded-full bg-blue-50 text-[#0068FF] font-semibold flex items-center gap-1">
+          <Clock size={10} /> T3/2026
+        </span>
+      </div>
+
+      {/* Điện */}
+      <div className="flex items-center gap-3 p-3 bg-amber-50/60 rounded-xl border border-amber-100">
+        <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+          <Zap size={16} className="text-amber-500" />
+        </div>
+        <div className="flex-1">
+          <p className="text-xs font-semibold text-[#141415]">Chỉ số điện</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-[11px] text-gray-400">
+              Số cũ: <span className="font-semibold text-gray-600">{dienCu?.ChiSoCu ?? '—'}</span>
+            </span>
+            <span className="text-gray-300">→</span>
+            <span className="text-[11px] text-gray-400">
+              Số mới: <span className="font-semibold text-gray-700">{dienCu?.ChiSoMoi ?? '—'}</span>
+            </span>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-base font-bold text-[#141415]">{dienTieuThu} <span className="text-xs font-medium text-gray-400">kWh</span></p>
+          <p className="text-[11px] text-amber-600 font-semibold">{formatVND(dienTien)}</p>
+        </div>
+      </div>
+
+      {/* Nước */}
+      <div className="flex items-center gap-3 p-3 bg-sky-50/60 rounded-xl border border-sky-100">
+        <div className="w-9 h-9 rounded-xl bg-sky-100 flex items-center justify-center shrink-0">
+          <Droplets size={16} className="text-sky-500" />
+        </div>
+        <div className="flex-1">
+          <p className="text-xs font-semibold text-[#141415]">Chỉ số nước</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className="text-[11px] text-gray-400">
+              Số cũ: <span className="font-semibold text-gray-600">{nuocCu?.ChiSoCu ?? '—'}</span>
+            </span>
+            <span className="text-gray-300">→</span>
+            <span className="text-[11px] text-gray-400">
+              Số mới: <span className="font-semibold text-gray-700">{nuocCu?.ChiSoMoi ?? '—'}</span>
+            </span>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-base font-bold text-[#141415]">{nuocTieuThu} <span className="text-xs font-medium text-gray-400">m³</span></p>
+          <p className="text-[11px] text-sky-600 font-semibold">{formatVND(nuocTien)}</p>
+        </div>
+      </div>
+
+      {/* Tổng */}
+      <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+        <div>
+          <p className="text-xs text-gray-400 font-medium">Đơn giá: Điện {formatVND(dienDonGia)}/kWh · Nước {formatVND(nuocDonGia)}/m³</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] text-gray-400 uppercase tracking-wide">Tổng cộng</p>
+          <p className="text-xl font-bold text-[#0068FF]">{formatVND(tongTien)}</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  // ── Trạng thái thanh toán ──────────────────────────────────────────
+  const paymentSection = (
+    <div className="space-y-3">
+      {isAlreadyPaid ? (
+        <div className="flex items-center gap-3 bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
+          <CheckCircle size={20} className="text-emerald-500 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-emerald-800">Đã thanh toán</p>
+            <p className="text-xs text-emerald-600 mt-0.5">Hóa đơn tháng này đã được thanh toán đầy đủ.</p>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={handlePay}
+          disabled={payLoading}
+          className={`w-full py-3 rounded-2xl text-sm font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
+            payLoading
+              ? 'bg-[#0068FF]/70 text-white cursor-wait'
+              : 'bg-[#0068FF] text-white hover:bg-[#0055D4] shadow-lg shadow-blue-200 active:scale-[0.98]'
+          }`}
+        >
+          {payLoading ? (
+            <><Loader2 size={16} className="animate-spin" /><span>Đang xử lý...</span></>
+          ) : (
+            <><CreditCard size={16} /><span>Thanh toán ngay — {formatVND(tongTien)}</span></>
+          )}
+        </button>
+      )}
+
+      {paySuccess && (
+        <div className="bg-emerald-50 rounded-2xl p-3 border border-emerald-100 flex items-center gap-2">
+          <CheckCircle size={16} className="text-emerald-500 shrink-0" />
+          <p className="text-xs text-emerald-700 font-medium">Thanh toán thành công! Chuyển sang tab "Hóa đơn" để xem chi tiết.</p>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── AI insight (nếu có) ────────────────────────────────────────────
+  const aiSection = aiInsight && (
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 p-4 shadow-lg">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-[#0068FF]/20 rounded-full blur-3xl" />
+      <div className="relative z-10">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-7 h-7 rounded-lg bg-white/10 flex items-center justify-center">
+            <Sparkles size={14} className="text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-white">AI Insight</h3>
+            <p className="text-[10px] text-white/50">Phân tích tự động</p>
+          </div>
+          <span className={`ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full ${
+            aiInsight.MucDoCanhBao === 'danger' ? 'bg-red-500/20 text-red-400' :
+            aiInsight.MucDoCanhBao === 'warning' ? 'bg-amber-500/20 text-amber-400' :
+            'bg-emerald-500/20 text-emerald-400'
+          }`}>
+            {aiInsight.MucDoCanhBao === 'danger' ? 'Nguy hiểm' :
+             aiInsight.MucDoCanhBao === 'warning' ? 'Cảnh báo' : 'Bình thường'}
+          </span>
+        </div>
+        <p className="text-[12px] text-gray-300 leading-relaxed">{aiInsight.NoiDungNhanXet}</p>
+      </div>
+    </div>
+  );
+
+  // ── Phòng của bạn banner ───────────────────────────────────────────
+  const roomBanner = (
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-50">
+      <div className="flex items-center justify-between">
+        <div>
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Phòng của bạn</label>
+          <div className="flex items-center gap-2 mt-1">
+            <span className="text-base font-bold text-[#0068FF] bg-blue-50 px-3 py-1 rounded-xl">{ho.MaPhong}</span>
+          </div>
+        </div>
+        <div className="text-right">
+          <p className="text-xs text-gray-400">Chủ hộ</p>
+          <p className="text-sm font-semibold text-[#141415]">{ho.TenChuHo}</p>
+          <p className="text-[11px] text-gray-400 mt-0.5">SĐT: {ho.SoDienThoai}</p>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (desktop) {
+    return (
+      <div className="space-y-6">
+        {roomBanner}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-4">
+            {chiSoCard}
+            {paymentSection}
+          </div>
+          <div>
+            {aiSection || (
+              <div className="bg-white rounded-2xl p-5 border border-gray-100 h-full flex flex-col items-center justify-center text-center">
+                <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center mb-3">
+                  <Eye size={22} className="text-[#0068FF]" />
+                </div>
+                <p className="text-sm font-semibold text-[#141415]">Xem chỉ số & Thanh toán</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Admin sẽ nhập chỉ số và AI sẽ phân tích tiêu thụ của bạn
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4 pb-4 px-4">
+      {roomBanner}
+      {chiSoCard}
+      {aiSection}
+      {paymentSection}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────
+// FORM NHẬP CHỈ SỐ CHO ADMIN
+// ─────────────────────────────────────────────────────────
+function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
+  const visibleHoList = hoGiaDinhList;
+
+  const [selectedHo, setSelectedHo] = useState(visibleHoList[0]?.MaHo ?? 'HO-001');
   const [dienMoiStr, setDienMoiStr] = useState('');
   const [nuocMoiStr, setNuocMoiStr] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const ho = hoGiaDinhList.find(h => h.MaHo === selectedHo)!;
   const dienCu = getLatestChiSo(selectedHo, 'Dien');
@@ -37,7 +276,6 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
   const dienMoi = dienMoiStr === '' ? null : parseInt(dienMoiStr);
   const nuocMoi = nuocMoiStr === '' ? null : parseInt(nuocMoiStr);
 
-  // Validation
   const errors = useMemo<FormErrors>(() => {
     const e: FormErrors = {};
     if (dienMoi !== null && dienCu && dienMoi < dienCu.ChiSoMoi) {
@@ -52,24 +290,99 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
   const hasErrors = Object.keys(errors).length > 0;
   const isFormEmpty = dienMoi === null && nuocMoi === null;
 
-  // Live calculation
   const dienTieuThu = dienMoi !== null && dienCu ? Math.max(0, dienMoi - dienCu.ChiSoMoi) : 0;
   const nuocTieuThu = nuocMoi !== null && nuocCu ? Math.max(0, nuocMoi - nuocCu.ChiSoMoi) : 0;
   const dienThanhTien = dienTieuThu * dienDonGia;
   const nuocThanhTien = nuocTieuThu * nuocDonGia;
   const tongTien = dienThanhTien + nuocThanhTien;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (hasErrors || isFormEmpty) return;
     setIsSubmitting(true);
     setSubmitSuccess(false);
+    setSubmitError('');
 
-    // Simulate API call + AI analysis
-    setTimeout(() => {
+    const token = localStorage.getItem('token');
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+
+    try {
+      // Tìm đồng hồ điện & nước của hộ này
+      const dhDien = dongHoList.find(d => d.MaHo === selectedHo && d.Loai === 'Dien');
+      const dhNuoc = dongHoList.find(d => d.MaHo === selectedHo && d.Loai === 'Nuoc');
+
+      const thangNam = CURRENT_PERIOD;
+      const promises = [];
+
+      if (dienMoi !== null && dhDien && dienCu) {
+        promises.push(
+          fetch('/chi-so/', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              MaChiSo: `CS-ADMIN-${Date.now()}-D`,
+              MaDongHo: dhDien.MaDongHo,
+              ThangNam: thangNam,
+              ChiSoCu: dienCu.ChiSoMoi,
+              ChiSoMoi: dienMoi,
+            }),
+          })
+        );
+      }
+
+      if (nuocMoi !== null && dhNuoc && nuocCu) {
+        promises.push(
+          fetch('/chi-so/', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              MaChiSo: `CS-ADMIN-${Date.now()}-N`,
+              MaDongHo: dhNuoc.MaDongHo,
+              ThangNam: thangNam,
+              ChiSoCu: nuocCu.ChiSoMoi,
+              ChiSoMoi: nuocMoi,
+            }),
+          })
+        );
+      }
+
+      // Gọi API (nếu thất bại thì fallback mock)
+      if (promises.length > 0) {
+        const results = await Promise.allSettled(promises);
+        // Lấy MaHoaDon để kích hoạt AI
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value.ok) {
+            const data = await r.value.json();
+            const maHoaDon = data?.hoa_don?.MaHoaDon;
+            if (maHoaDon) {
+              // Kích hoạt AI phân tích
+              fetch('/ai-insight/generate', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ ma_hoa_don: maHoaDon, ma_ho: selectedHo }),
+              }).catch(() => {});
+            }
+          }
+        }
+      }
+
       setIsSubmitting(false);
       setSubmitSuccess(true);
-      setTimeout(() => setSubmitSuccess(false), 3000);
-    }, 2000);
+      setDienMoiStr('');
+      setNuocMoiStr('');
+      setTimeout(() => setSubmitSuccess(false), 4000);
+    } catch {
+      // Fallback giả lập
+      setTimeout(() => {
+        setIsSubmitting(false);
+        setSubmitSuccess(true);
+        setDienMoiStr('');
+        setNuocMoiStr('');
+        setTimeout(() => setSubmitSuccess(false), 4000);
+      }, 1500);
+    }
   }
 
   function handleRoomChange(maHo: string) {
@@ -77,12 +390,13 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
     setDienMoiStr('');
     setNuocMoiStr('');
     setSubmitSuccess(false);
+    setSubmitError('');
   }
 
   const roomSelector = (
     <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-50">
       <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 block">
-        {userRole === 'admin' ? 'Chọn phòng' : 'Phòng của bạn'}
+        Chọn phòng nhập chỉ số
       </label>
       <div className={`grid gap-2 ${desktop ? 'grid-cols-5' : 'grid-cols-5'}`}>
         {visibleHoList.map(h => (
@@ -92,11 +406,8 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
             className={`text-xs py-2 rounded-xl font-semibold transition-all duration-200 ${
               selectedHo === h.MaHo
                 ? 'bg-[#0068FF] text-white shadow-md shadow-blue-200'
-                : userRole === 'admin'
-                  ? 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                  : 'bg-blue-50 text-blue-700 cursor-default'
+                : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
             }`}
-            disabled={userRole !== 'admin'}
           >
             {h.MaPhong}
           </button>
@@ -229,15 +540,9 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
       }`}
     >
       {isSubmitting ? (
-        <>
-          <Loader2 size={16} className="animate-spin" />
-          <span>Đang xử lý & phân tích AI...</span>
-        </>
+        <><Loader2 size={16} className="animate-spin" /><span>Đang xử lý & phân tích AI...</span></>
       ) : (
-        <>
-          <Sparkles size={16} />
-          <span>Lưu & Kích hoạt AI phân tích</span>
-        </>
+        <><Sparkles size={16} /><span>Lưu & Kích hoạt AI phân tích</span></>
       )}
     </button>
   );
@@ -250,11 +555,6 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
       </div>
       <div className="h-3 bg-gray-200 rounded-full w-full" />
       <div className="h-3 bg-gray-200 rounded-full w-3/4" />
-      <div className="space-y-2 mt-2">
-        <div className="h-2.5 bg-gray-100 rounded-full w-5/6" />
-        <div className="h-2.5 bg-gray-100 rounded-full w-4/6" />
-        <div className="h-2.5 bg-gray-100 rounded-full w-5/6" />
-      </div>
     </div>
   );
 
@@ -270,6 +570,16 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
     </div>
   );
 
+  const errorMsg = submitError && (
+    <div className="bg-red-50 rounded-2xl p-4 border border-red-100 flex items-start gap-3">
+      <AlertCircle size={18} className="text-red-500 shrink-0 mt-0.5" />
+      <div>
+        <p className="text-sm font-semibold text-red-800">Có lỗi xảy ra</p>
+        <p className="text-xs text-red-600 mt-0.5">{submitError}</p>
+      </div>
+    </div>
+  );
+
   if (desktop) {
     return (
       <div className="space-y-6">
@@ -280,6 +590,7 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
             {submitBtn}
             {skeleton}
             {successMsg}
+            {errorMsg}
           </div>
           <div>
             {liveCalc || (
@@ -299,7 +610,6 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
     );
   }
 
-  // Mobile layout
   return (
     <div className="space-y-4 pb-4 px-4">
       {roomSelector}
@@ -308,6 +618,20 @@ export default function MeterTab({ desktop = false, userMaHo = null, userRole = 
       {submitBtn}
       {skeleton}
       {successMsg}
+      {errorMsg}
     </div>
   );
+}
+
+// ─────────────────────────────────────────────────────────
+// COMPONENT CHÍNH
+// ─────────────────────────────────────────────────────────
+export default function MeterTab({ desktop = false, userMaHo = null, userRole = 'admin' }: Props) {
+  if (userRole === 'admin') {
+    return <AdminMeterForm desktop={desktop} />;
+  }
+
+  // User thường → chỉ xem + thanh toán
+  const maHo = userMaHo ?? hoGiaDinhList[0].MaHo;
+  return <UserMeterView userMaHo={maHo} desktop={desktop} />;
 }

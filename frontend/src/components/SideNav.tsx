@@ -1,18 +1,19 @@
-import { LayoutDashboard, ClipboardEdit, Receipt, Zap, Droplets } from 'lucide-react';
+import { LayoutDashboard, ClipboardEdit, Receipt, Zap, Droplets, Eye } from 'lucide-react';
 import type { TabId } from '../types';
 
 interface SideNavProps {
   activeTab: TabId;
   onTabChange: (tab: TabId) => void;
+  userRole?: string;
 }
 
-const tabs: { id: TabId; label: string; desc: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'dashboard', label: 'Tổng quan', desc: 'Thống kê & biểu đồ', icon: LayoutDashboard },
-  { id: 'meter', label: 'Nhập số', desc: 'Cập nhật chỉ số', icon: ClipboardEdit },
-  { id: 'bill', label: 'Hóa đơn', desc: 'Chi tiết & thanh toán', icon: Receipt },
-];
-
-export default function SideNav({ activeTab, onTabChange }: SideNavProps) {
+export default function SideNav({ activeTab, onTabChange, userRole = 'admin' }: SideNavProps) {
+  const isAdmin = userRole === 'admin';
+  const tabs: { id: TabId; label: string; desc: string; icon: typeof LayoutDashboard }[] = [
+    { id: 'dashboard', label: 'Tổng quan', desc: isAdmin ? 'Thống kê & biểu đồ' : 'Tiêu thụ của bạn', icon: LayoutDashboard },
+    { id: 'meter', label: isAdmin ? 'Nhập số' : 'Chỉ số', desc: isAdmin ? 'Cập nhật chỉ số' : 'Xem chỉ số', icon: isAdmin ? ClipboardEdit : Eye },
+    { id: 'bill', label: 'Hóa đơn', desc: 'Chi tiết & thanh toán', icon: Receipt },
+  ];
   return (
     <aside className="w-64 min-h-screen bg-gradient-to-b from-[#003BBE] to-[#0068FF] flex flex-col shadow-xl">
       {/* Brand */}

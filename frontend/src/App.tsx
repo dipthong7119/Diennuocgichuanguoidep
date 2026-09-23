@@ -75,14 +75,14 @@ export default function App() {
             {activeTab === 'meter' && <MeterTab userMaHo={user.ma_ho} userRole={user.role} />}
             {activeTab === 'bill' && <BillTab userMaHo={user.ma_ho} userRole={user.role} />}
           </main>
-          <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+          <BottomNav activeTab={activeTab} onTabChange={setActiveTab} userRole={user.role} />
         </div>
       </div>
 
       {/* ── Desktop Layout (≥ md) ─────────────────────────────── */}
       <div className="hidden md:flex min-h-screen">
         {/* Sidebar */}
-        <SideNav activeTab={activeTab} onTabChange={setActiveTab} />
+        <SideNav activeTab={activeTab} onTabChange={setActiveTab} userRole={user.role} />
 
         {/* Main content */}
         <div className="flex-1 flex flex-col min-h-screen overflow-hidden">
