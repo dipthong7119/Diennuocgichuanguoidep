@@ -5,7 +5,8 @@
 
 $ROOT = Split-Path -Parent $MyInvocation.MyCommand.Path
 $FRONTEND = Join-Path $ROOT "frontend"
-$STATIC   = Join-Path $ROOT "static"
+$BACKEND  = Join-Path $ROOT "backend"
+$STATIC   = Join-Path $BACKEND "static"
 
 Write-Host "" 
 Write-Host "========================================" -ForegroundColor Cyan
@@ -51,5 +52,11 @@ Write-Host "  Nhan Ctrl+C de dung server             " -ForegroundColor Yellow
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-Set-Location $ROOT
+Set-Location $BACKEND
+
+# Khoi tao du lieu mau neu chua co
+Write-Host "[Seed] Kiem tra va khoi tao du lieu mau..." -ForegroundColor Yellow
+py -X utf8 seed_data.py
+Write-Host ""
+
 py -m uvicorn main:app --reload --host 0.0.0.0 --port 8000

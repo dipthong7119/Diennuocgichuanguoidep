@@ -28,6 +28,15 @@ export default function App() {
     return null;
   });
 
+  // Hàm xóa phiên và về màn hình đăng nhập (dùng khi gặp lỗi 401)
+  function clearSession() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    localStorage.removeItem('role');
+    localStorage.removeItem('ma_ho');
+    setUser(null);
+  }
+
   function handleLogin(username: string, role: string, ma_ho: string | null) {
     setUser({ username, role, ma_ho });
   }
@@ -71,9 +80,9 @@ export default function App() {
             onLogout={handleLogout}
           />
           <main className="flex-1 overflow-y-auto pt-4 pb-20">
-            {activeTab === 'dashboard' && <DashboardTab userRole={user.role} userMaHo={user.ma_ho} />}
-            {activeTab === 'meter' && <MeterTab userMaHo={user.ma_ho} userRole={user.role} />}
-            {activeTab === 'bill' && <BillTab userMaHo={user.ma_ho} userRole={user.role} />}
+            {activeTab === 'dashboard' && <DashboardTab userRole={user.role} userMaHo={user.ma_ho} onSessionExpired={clearSession} />}
+            {activeTab === 'meter' && <MeterTab userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
+            {activeTab === 'bill' && <BillTab userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
           </main>
           <BottomNav activeTab={activeTab} onTabChange={setActiveTab} userRole={user.role} />
         </div>
@@ -100,9 +109,9 @@ export default function App() {
           {/* Scrollable content area */}
           <main className="flex-1 overflow-y-auto bg-[#F4F5F6]">
             <div className="max-w-5xl mx-auto py-6 px-4">
-              {activeTab === 'dashboard' && <DashboardTab desktop userRole={user.role} userMaHo={user.ma_ho} />}
-              {activeTab === 'meter' && <MeterTab desktop userMaHo={user.ma_ho} userRole={user.role} />}
-              {activeTab === 'bill' && <BillTab desktop userMaHo={user.ma_ho} userRole={user.role} />}
+              {activeTab === 'dashboard' && <DashboardTab desktop userRole={user.role} userMaHo={user.ma_ho} onSessionExpired={clearSession} />}
+              {activeTab === 'meter' && <MeterTab desktop userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
+              {activeTab === 'bill' && <BillTab desktop userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
             </div>
           </main>
         </div>

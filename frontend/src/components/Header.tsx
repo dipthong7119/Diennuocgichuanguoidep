@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Bell, Menu, LogOut, User, Shield, X } from 'lucide-react';
+import { Bell, Menu, LogOut, User, Shield, X, CheckCircle, AlertTriangle, Info } from 'lucide-react';
 
 interface HeaderProps {
   maPhong: string;
@@ -11,17 +11,49 @@ interface HeaderProps {
   onLogout?: () => void;
 }
 
+// Dữ liệu thông báo mẫu dựa trên hệ thống
+const NOTIFICATIONS = [
+  {
+    id: 1,
+    type: 'warning',
+    title: 'Tiêu thụ nước tăng bất thường',
+    desc: 'Phòng P102 tháng 8/2026 tăng 150% so với trung bình. Kiểm tra rò rỉ ngay.',
+    time: '5 phút trước',
+    read: false,
+  },
+  {
+    id: 2,
+    type: 'info',
+    title: 'Hóa đơn tháng 8/2026 đã được tạo',
+    desc: '5 hóa đơn tháng 8 đã sẵn sàng. 5 hóa đơn chưa thanh toán.',
+    time: '1 giờ trước',
+    read: false,
+  },
+  {
+    id: 3,
+    type: 'success',
+    title: 'Thanh toán thành công',
+    desc: 'Hóa đơn tháng 7/2026 đã được thanh toán đầy đủ.',
+    time: 'Hôm qua',
+    read: true,
+  },
+];
+
 export default function Header({
   maPhong, tenChuHo, currentPeriod, desktop = false,
   username, role, onLogout,
 }: HeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [notifications, setNotifications] = useState(NOTIFICATIONS);
   const menuRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLDivElement>(null);
 
   const [year, month] = currentPeriod.split('-');
   const periodLabel = `Kỳ T${parseInt(month)}/${year}`;
 
   const isAdmin = role === 'admin';
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   // Click outside to close
   useEffect(() => {
@@ -29,10 +61,106 @@ export default function Header({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setBellOpen(false);
+      }
     }
-    if (menuOpen) document.addEventListener('mousedown', handleClick);
+    document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
-  }, [menuOpen]);
+  }, []);
+
+  function markAllRead() {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  }
+
+  function markRead(id: number) {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  }
+
+  const notifIcon = (type: string) => {
+    if (type === 'warning') return <AlertTriangle size={14} className="text-amber-500" />;
+    if (type === 'success') return <CheckCircle size={14} className="text-emerald-500" />;
+    return <Info size={14} className="text-blue-500" />;
+  };
+
+  const notifBg = (type: string) => {
+    if (type === 'warning') return 'bg-amber-50';
+    if (type === 'success') return 'bg-emerald-50';
+    return 'bg-blue-50';
+  };
+
+  // Panel thông báo
+  const bellPanel = bellOpen && (
+    <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl shadow-black/15 border border-gray-100 z-[999] overflow-hidden">
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Bell size={14} className="text-[#0068FF]" />
+          <span className="text-sm font-semibold text-[#141415]">Thông báo</span>
+          {unreadCount > 0 && (
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500 text-white">
+              {unreadCount}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 && (
+            <button
+              onClick={markAllRead}
+              className="text-[11px] text-[#0068FF] hover:underline"
+            >
+              Đọc tất cả
+            </button>
+          )}
+          <button
+            onClick={() => setBellOpen(false)}
+            className="w-6 h-6 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-400"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+
+      {/* Notification list */}
+      <div className="max-h-72 overflow-y-auto divide-y divide-gray-50">
+        {notifications.length === 0 ? (
+          <div className="px-4 py-8 text-center">
+            <Bell size={28} className="text-gray-200 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">Không có thông báo nào</p>
+          </div>
+        ) : (
+          notifications.map(n => (
+            <div
+              key={n.id}
+              onClick={() => markRead(n.id)}
+              className={`px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors flex gap-3 ${!n.read ? 'bg-blue-50/30' : ''}`}
+            >
+              <div className={`w-8 h-8 rounded-xl ${notifBg(n.type)} flex items-center justify-center shrink-0 mt-0.5`}>
+                {notifIcon(n.type)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <p className={`text-[12px] font-semibold leading-tight ${!n.read ? 'text-[#141415]' : 'text-gray-500'}`}>
+                    {n.title}
+                  </p>
+                  {!n.read && (
+                    <span className="w-2 h-2 rounded-full bg-[#0068FF] shrink-0 mt-1" />
+                  )}
+                </div>
+                <p className="text-[11px] text-gray-400 mt-0.5 leading-relaxed line-clamp-2">{n.desc}</p>
+                <p className="text-[10px] text-gray-300 mt-1">{n.time}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-2.5 border-t border-gray-50 text-center">
+        <p className="text-[11px] text-gray-400">Dữ liệu phân tích từ AI hệ thống</p>
+      </div>
+    </div>
+  );
 
   const userMenu = menuOpen && (
     <div
@@ -109,8 +237,8 @@ export default function Header({
         <div>
           <h2 className="text-sm font-semibold text-[#141415]">
             {isAdmin
-              ? <>Xin chào, <span className="text-[#0068FF]">Quản trị viên</span></>
-              : <>Xin chào, <span className="text-[#0068FF]">{tenChuHo}</span></>}
+              ? <> Xin chào, <span className="text-[#0068FF]">Quản trị viên</span></>
+              : <> Xin chào, <span className="text-[#0068FF]">{tenChuHo}</span></>}
           </h2>
           <p className="text-xs text-gray-400 mt-0.5">
             {isAdmin ? 'Quản trị hệ thống' : `Phòng ${maPhong} · ${periodLabel}`}
@@ -122,16 +250,25 @@ export default function Header({
             {isAdmin ? <Shield size={12} /> : <User size={12} />}
             {username} ({isAdmin ? 'Admin' : 'User'})
           </div>
-          <button
-            id="btn-notification-desktop"
-            className="w-9 h-9 bg-gray-50 hover:bg-gray-100 rounded-xl flex items-center justify-center transition-colors relative"
-          >
-            <Bell size={18} className="text-gray-500" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-          </button>
+
+          {/* Bell button */}
+          <div ref={bellRef} className="relative">
+            <button
+              id="btn-notification-desktop"
+              onClick={() => { setBellOpen(!bellOpen); setMenuOpen(false); }}
+              className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors relative ${bellOpen ? 'bg-[#0068FF] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-500'}`}
+            >
+              <Bell size={18} />
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              )}
+            </button>
+            {bellPanel}
+          </div>
+
           <button
             id="btn-menu-desktop"
-            onClick={() => setMenuOpen(!menuOpen)}
+            onClick={() => { setMenuOpen(!menuOpen); setBellOpen(false); }}
             className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${menuOpen ? 'bg-[#0068FF] text-white' : 'bg-gray-50 hover:bg-gray-100 text-gray-500'}`}
           >
             <Menu size={18} />
@@ -170,15 +307,24 @@ export default function Header({
         </div>
 
         <div className="flex items-center gap-2 relative">
-          <button
-            id="btn-notification-mobile"
-            className="w-9 h-9 bg-white/15 backdrop-blur-sm rounded-xl flex items-center justify-center hover:bg-white/25 transition-colors"
-          >
-            <Bell size={18} />
-          </button>
+          {/* Bell button mobile */}
+          <div ref={bellRef} className="relative">
+            <button
+              id="btn-notification-mobile"
+              onClick={() => { setBellOpen(!bellOpen); setMenuOpen(false); }}
+              className="w-9 h-9 bg-white/15 backdrop-blur-sm rounded-xl flex items-center justify-center hover:bg-white/25 transition-colors relative"
+            >
+              <Bell size={18} />
+              {unreadCount > 0 && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-400 rounded-full animate-pulse" />
+              )}
+            </button>
+            {bellPanel}
+          </div>
+
           <button
             id="btn-menu-mobile"
-            onClick={() => setMenuOpen(!menuOpen)}
+            onClick={() => { setMenuOpen(!menuOpen); setBellOpen(false); }}
             className={`w-9 h-9 backdrop-blur-sm rounded-xl flex items-center justify-center transition-colors ${menuOpen ? 'bg-white/30' : 'bg-white/15 hover:bg-white/25'}`}
           >
             <Menu size={18} />

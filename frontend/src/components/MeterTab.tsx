@@ -13,6 +13,7 @@ interface Props {
   desktop?: boolean;
   userMaHo?: string | null;
   userRole?: string;
+  onSessionExpired?: () => void;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -263,6 +264,8 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
   const [selectedHo, setSelectedHo] = useState(visibleHoList[0]?.MaHo ?? 'HO-001');
   const [dienMoiStr, setDienMoiStr] = useState('');
   const [nuocMoiStr, setNuocMoiStr] = useState('');
+  const [dienThayDongHo, setDienThayDongHo] = useState(false);
+  const [nuocThayDongHo, setNuocThayDongHo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [submitError, setSubmitError] = useState('');
@@ -278,20 +281,28 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
 
   const errors = useMemo<FormErrors>(() => {
     const e: FormErrors = {};
-    if (dienMoi !== null && dienCu && dienMoi < dienCu.ChiSoMoi) {
-      e.dienMoi = `Số mới không được nhỏ hơn số cũ (${dienCu.ChiSoMoi})`;
+    // Chỉ báo lỗi khi chỉ số mới bé hơn chỉ số cũ VÀ chưa đánh dấu "đã thay đồng hồ".
+    // Nếu đồng hồ vừa được thay/reset, số đọc mới nhỏ hơn số cũ là hợp lệ.
+    if (dienMoi !== null && dienCu && dienMoi < dienCu.ChiSoMoi && !dienThayDongHo) {
+      e.dienMoi = `Số mới không được nhỏ hơn số cũ (${dienCu.ChiSoMoi}). Nếu vừa thay đồng hồ, hãy tích "Đã thay đồng hồ mới".`;
     }
-    if (nuocMoi !== null && nuocCu && nuocMoi < nuocCu.ChiSoMoi) {
-      e.nuocMoi = `Số mới không được nhỏ hơn số cũ (${nuocCu.ChiSoMoi})`;
+    if (nuocMoi !== null && nuocCu && nuocMoi < nuocCu.ChiSoMoi && !nuocThayDongHo) {
+      e.nuocMoi = `Số mới không được nhỏ hơn số cũ (${nuocCu.ChiSoMoi}). Nếu vừa thay đồng hồ, hãy tích "Đã thay đồng hồ mới".`;
     }
     return e;
-  }, [dienMoi, nuocMoi, dienCu, nuocCu]);
+  }, [dienMoi, nuocMoi, dienCu, nuocCu, dienThayDongHo, nuocThayDongHo]);
 
   const hasErrors = Object.keys(errors).length > 0;
   const isFormEmpty = dienMoi === null && nuocMoi === null;
 
-  const dienTieuThu = dienMoi !== null && dienCu ? Math.max(0, dienMoi - dienCu.ChiSoMoi) : 0;
-  const nuocTieuThu = nuocMoi !== null && nuocCu ? Math.max(0, nuocMoi - nuocCu.ChiSoMoi) : 0;
+  // Nếu vừa thay đồng hồ và số mới < số cũ → tiêu thụ tính trực tiếp từ số mới
+  // (đồng hồ mới coi như bắt đầu từ 0), khớp với logic backend (_tinh_tong_tien).
+  const dienTieuThu = dienMoi !== null && dienCu
+    ? (dienThayDongHo && dienMoi < dienCu.ChiSoMoi ? dienMoi : Math.max(0, dienMoi - dienCu.ChiSoMoi))
+    : 0;
+  const nuocTieuThu = nuocMoi !== null && nuocCu
+    ? (nuocThayDongHo && nuocMoi < nuocCu.ChiSoMoi ? nuocMoi : Math.max(0, nuocMoi - nuocCu.ChiSoMoi))
+    : 0;
   const dienThanhTien = dienTieuThu * dienDonGia;
   const nuocThanhTien = nuocTieuThu * nuocDonGia;
   const tongTien = dienThanhTien + nuocThanhTien;
@@ -327,6 +338,7 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
               ThangNam: thangNam,
               ChiSoCu: dienCu.ChiSoMoi,
               ChiSoMoi: dienMoi,
+              ThayDongHo: dienThayDongHo,
             }),
           })
         );
@@ -343,6 +355,7 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
               ThangNam: thangNam,
               ChiSoCu: nuocCu.ChiSoMoi,
               ChiSoMoi: nuocMoi,
+              ThayDongHo: nuocThayDongHo,
             }),
           })
         );
@@ -372,6 +385,8 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
       setSubmitSuccess(true);
       setDienMoiStr('');
       setNuocMoiStr('');
+      setDienThayDongHo(false);
+      setNuocThayDongHo(false);
       setTimeout(() => setSubmitSuccess(false), 4000);
     } catch {
       // Fallback giả lập
@@ -380,6 +395,8 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
         setSubmitSuccess(true);
         setDienMoiStr('');
         setNuocMoiStr('');
+        setDienThayDongHo(false);
+        setNuocThayDongHo(false);
         setTimeout(() => setSubmitSuccess(false), 4000);
       }, 1500);
     }
@@ -389,6 +406,8 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
     setSelectedHo(maHo);
     setDienMoiStr('');
     setNuocMoiStr('');
+    setDienThayDongHo(false);
+    setNuocThayDongHo(false);
     setSubmitSuccess(false);
     setSubmitError('');
   }
@@ -456,6 +475,17 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
             <p className="text-[11px] text-red-500">{errors.dienMoi}</p>
           </div>
         )}
+        <label className="flex items-center gap-1.5 mt-1.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={dienThayDongHo}
+            onChange={(e) => setDienThayDongHo(e.target.checked)}
+            className="w-3.5 h-3.5 rounded accent-[#0068FF]"
+          />
+          <span className="text-[11px] text-gray-500">
+            Đã thay đồng hồ điện mới (cho phép số mới nhỏ hơn số cũ)
+          </span>
+        </label>
       </div>
 
       {/* Số nước */}
@@ -488,6 +518,17 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
             <p className="text-[11px] text-red-500">{errors.nuocMoi}</p>
           </div>
         )}
+        <label className="flex items-center gap-1.5 mt-1.5 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={nuocThayDongHo}
+            onChange={(e) => setNuocThayDongHo(e.target.checked)}
+            className="w-3.5 h-3.5 rounded accent-[#0068FF]"
+          />
+          <span className="text-[11px] text-gray-500">
+            Đã thay đồng hồ nước mới (cho phép số mới nhỏ hơn số cũ)
+          </span>
+        </label>
       </div>
     </div>
   );

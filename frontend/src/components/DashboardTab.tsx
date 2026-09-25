@@ -11,6 +11,7 @@ interface Props {
   desktop?: boolean;
   userRole?: string;
   userMaHo?: string | null;
+  onSessionExpired?: () => void;
 }
 
 export default function DashboardTab({ desktop = false, userRole = 'user', userMaHo = null }: Props) {
