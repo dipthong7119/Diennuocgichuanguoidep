@@ -6,6 +6,7 @@ import {
   phanTichAIList, getLast3Months, getTieuThu, formatVND, formatThang,
   CURRENT_PERIOD,
 } from '../data/mockData';
+import AdminDashboardTable from './AdminDashboardTable';
 
 interface Props {
   desktop?: boolean;
@@ -237,7 +238,10 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
                 <div>
                   <h2 className="text-base font-semibold text-[#141415]">Phòng {ho.MaPhong} — {ho.TenChuHo}</h2>
                   {isAdmin && (
-                    <p className="text-xs text-gray-400 mt-0.5">{ho.SoDienThoai}</p>
+                    <>
+                      <p className="text-xs text-gray-500 mt-0.5">SĐT: {ho.SoDienThoai}</p>
+                      {ho.DiaChi && <p className="text-xs text-gray-500 mt-0.5">Địa chỉ: {ho.DiaChi}</p>}
+                    </>
                   )}
                 </div>
                 <span className="text-xs px-3 py-1 rounded-full bg-blue-50 text-[#0068FF] font-semibold">
@@ -387,6 +391,9 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
             )}
           </div>
         </div>
+
+        {/* ── Advanced Admin Dashboard (Table) ── */}
+        {isAdmin && <AdminDashboardTable token={localStorage.getItem('token')} />}
       </div>
     );
   }
@@ -479,7 +486,10 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
           <div>
             <h2 className="text-sm font-semibold text-[#141415]">Phòng {ho.MaPhong} — {ho.TenChuHo}</h2>
             {isAdmin && (
-              <p className="text-[10px] text-gray-400 mt-0.5">{ho.SoDienThoai}</p>
+              <>
+                <p className="text-[10px] text-gray-500 mt-0.5">SĐT: {ho.SoDienThoai}</p>
+                {ho.DiaChi && <p className="text-[10px] text-gray-500 mt-0.5">Địa chỉ: {ho.DiaChi}</p>}
+              </>
             )}
           </div>
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-[#0068FF] font-semibold">
@@ -605,6 +615,13 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
           </div>
         </div>
       </div>
+
+      {/* ── Advanced Admin Dashboard (Mobile) ── */}
+      {isAdmin && (
+        <div className="mx-4">
+          <AdminDashboardTable token={localStorage.getItem('token')} />
+        </div>
+      )}
     </div>
   );
 }

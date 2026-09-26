@@ -10,11 +10,15 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List
 
-from database import get_db, HoGiaDinh
+from database import get_db, HoGiaDinh, DongHo
 from schemas import HoGiaDinhCreate, HoGiaDinhUpdate, HoGiaDinhResponse, MessageResponse
 from routers.auth import require_login, require_admin
 
 router = APIRouter(prefix="/ho-gia-dinh", tags=["Hộ Gia Đình"])
+
+# Đơn giá mặc định khi không truyền vào
+DON_GIA_DIEN_MAC_DINH = 3500.0
+DON_GIA_NUOC_MAC_DINH = 15000.0
 
 
 @router.get("/", response_model=List[HoGiaDinhResponse], summary="Lấy danh sách hộ gia đình")
@@ -66,14 +70,36 @@ def create_ho_gia_dinh(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),   # chỉ admin
 ):
-    """Tạo một hộ gia đình mới. MaHo phải duy nhất. **Chỉ admin.**"""
+    """
+    Tạo một hộ gia đình mới. MaHo và MaPhong phải duy nhất. **Chỉ admin.**
+    Tự động tạo kèm 2 đồng hồ (Điện + Nước) với đơn giá mặc định hoặc tùy chọn.
+    """
     try:
+        # Kiểm tra MaHo trùng
         existing = db.query(HoGiaDinh).filter(HoGiaDinh.MaHo == payload.MaHo).first()
         if existing:
             raise HTTPException(status_code=409, detail=f"MaHo '{payload.MaHo}' đã tồn tại")
 
-        ho = HoGiaDinh(**payload.model_dump())
+        # Kiểm tra MaPhong trùng
+        existing_phong = db.query(HoGiaDinh).filter(HoGiaDinh.MaPhong == payload.MaPhong).first()
+        if existing_phong:
+            raise HTTPException(status_code=409, detail=f"MaPhong '{payload.MaPhong}' đã tồn tại")
+
+        # Tạo hộ gia đình (loại bỏ DonGiaDien, DonGiaNuoc — không thuộc model HoGiaDinh)
+        ho_data = payload.model_dump(exclude={"DonGiaDien", "DonGiaNuoc"})
+        ho = HoGiaDinh(**ho_data)
         db.add(ho)
+
+        # Tự động tạo 2 đồng hồ (Điện + Nước)
+        don_gia_dien = payload.DonGiaDien or DON_GIA_DIEN_MAC_DINH
+        don_gia_nuoc = payload.DonGiaNuoc or DON_GIA_NUOC_MAC_DINH
+
+        ma_dong_ho_dien = f"DH-{payload.MaHo}-D"
+        ma_dong_ho_nuoc = f"DH-{payload.MaHo}-N"
+
+        db.add(DongHo(MaDongHo=ma_dong_ho_dien, MaHo=payload.MaHo, Loai="Điện", DonGia=don_gia_dien))
+        db.add(DongHo(MaDongHo=ma_dong_ho_nuoc, MaHo=payload.MaHo, Loai="Nước", DonGia=don_gia_nuoc))
+
         db.commit()
         db.refresh(ho)
         return ho

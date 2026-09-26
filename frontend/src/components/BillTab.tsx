@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import {
   Zap, Droplets, CheckCircle, XCircle, Sparkles, Lightbulb,
-  Printer, CreditCard, ChevronDown, ChevronUp, Shield, Loader2, MessageCircle, Send,
+  Printer, CreditCard, ChevronDown, ChevronUp, Shield, Loader2, MessageCircle, Send, TrendingUp
 } from 'lucide-react';
+import { BarChart, Bar, ResponsiveContainer, Cell, Tooltip } from 'recharts';
 import {
   hoGiaDinhList, dongHoList
 } from '../data/mockData';
@@ -434,6 +435,34 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-amber-400">Gợi ý tiết kiệm</span>
                 </div>
                 <div className="text-[12px] text-gray-200 leading-relaxed">
+                  {aiInsight.GoiYTietKiem.map((g: string, i: number) => <p key={i}>• {g}</p>)}
+                </div>
+              </div>
+            )}
+            
+            {aiInsight.DuLieuBieuDo && aiInsight.DuLieuBieuDo.length > 0 && (
+              <div className={`bg-white/5 backdrop-blur-sm rounded-xl p-3 border ${getAlertColor(aiInsight.MucDoCanhBao).border}`}>
+                <div className="flex items-center gap-1.5 mb-2">
+                  <TrendingUp size={12} className={getAlertColor(aiInsight.MucDoCanhBao).text} />
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${getAlertColor(aiInsight.MucDoCanhBao).text}`}>
+                    Biến động 3 kỳ gần nhất
+                  </span>
+                </div>
+                <div className="h-24 mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={aiInsight.DuLieuBieuDo.map((val: number, idx: number) => ({ name: `Kỳ ${idx+1}`, value: val }))}>
+                      <Tooltip
+                        contentStyle={{ background: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
+                        itemStyle={{ color: '#fff' }}
+                        cursor={{ fill: 'rgba(255,255,255,0.1)' }}
+                      />
+                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                        {aiInsight.DuLieuBieuDo.map((_: number, idx: number) => (
+                          <Cell key={idx} fill={idx === aiInsight.DuLieuBieuDo.length - 1 ? '#F59E0B' : '#94A3B8'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             )}

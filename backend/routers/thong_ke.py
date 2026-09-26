@@ -180,3 +180,127 @@ def canh_bao_tieu_thu(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi truy vấn cảnh báo: {str(e)}")
+
+
+@router.get("/xep-hang", summary="Xếp hạng tiêu thụ theo hộ")
+def xep_hang_tieu_thu(
+    loai: str = "Dien",
+    thang: str | None = None,
+    sap_xep: str = "giam_dan",
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin),   # chỉ admin
+):
+    """
+    Xếp hạng hộ gia đình theo mức tiêu thụ Điện hoặc Nước. **Chỉ admin.**
+
+    Query params:
+    - **loai**: "Dien" hoặc "Nuoc" (mặc định "Dien")
+    - **thang**: "YYYY-MM" (ví dụ "2026-03"). Nếu không truyền → lấy kỳ mới nhất.
+    - **sap_xep**: "giam_dan" (mặc định) hoặc "tang_dan"
+    """
+    try:
+        from datetime import date as date_type
+        loai_db = "Điện" if loai == "Dien" else "Nước"
+
+        # Lấy tất cả đồng hồ theo loại
+        dong_hos = db.query(DongHo).filter(DongHo.Loai == loai_db).all()
+        if not dong_hos:
+            return []
+
+        ma_dh_to_ho = {dh.MaDongHo: dh.MaHo for dh in dong_hos}
+        ma_dh_list = list(ma_dh_to_ho.keys())
+
+        # Build query chỉ số
+        query = db.query(ChiSoTieuThu).filter(ChiSoTieuThu.MaDongHo.in_(ma_dh_list))
+
+        if thang:
+            # Parse "YYYY-MM" → date(YYYY, MM, 1)
+            parts = thang.split("-")
+            target_date = date_type(int(parts[0]), int(parts[1]), 1)
+            query = query.filter(ChiSoTieuThu.ThangNam == target_date)
+        else:
+            # Lấy kỳ mới nhất
+            latest = (
+                db.query(ChiSoTieuThu.ThangNam)
+                .filter(ChiSoTieuThu.MaDongHo.in_(ma_dh_list))
+                .order_by(ChiSoTieuThu.ThangNam.desc())
+                .first()
+            )
+            if latest:
+                query = query.filter(ChiSoTieuThu.ThangNam == latest[0])
+
+        chi_so_list = query.all()
+
+        # Tính tiêu thụ theo hộ
+        ho_tieu_thu: dict[str, int] = {}
+        for cs in chi_so_list:
+            ma_ho = ma_dh_to_ho.get(cs.MaDongHo)
+            if ma_ho:
+                ho_tieu_thu[ma_ho] = ho_tieu_thu.get(ma_ho, 0) + (cs.ChiSoMoi - cs.ChiSoCu)
+
+        # Lấy thông tin hộ
+        ho_dict = {ho.MaHo: ho for ho in db.query(HoGiaDinh).all()}
+
+        result = []
+        for ma_ho, tieu_thu in ho_tieu_thu.items():
+            ho = ho_dict.get(ma_ho)
+            if ho:
+                result.append({
+                    "ma_ho": ma_ho,
+                    "ma_phong": ho.MaPhong,
+                    "ten_chu_ho": ho.TenChuHo,
+                    "tieu_thu": tieu_thu,
+                    "loai": loai,
+                })
+
+        # Sắp xếp
+        reverse = sap_xep != "tang_dan"
+        result.sort(key=lambda x: x["tieu_thu"], reverse=reverse)
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi xếp hạng: {str(e)}")
+
+
+@router.get("/hoa-don-loc", summary="Lọc hóa đơn theo năm/tháng")
+def loc_hoa_don(
+    nam: int | None = None,
+    thang: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin),   # chỉ admin
+):
+    """
+    Lọc danh sách hóa đơn theo năm và/hoặc tháng. **Chỉ admin.**
+
+    Query params:
+    - **nam**: năm (ví dụ 2026). Nếu không truyền → tất cả.
+    - **thang**: tháng (1-12). Nếu không truyền → cả năm.
+    """
+    try:
+        from sqlalchemy import extract
+        query = db.query(HoaDon, HoGiaDinh).join(
+            HoGiaDinh, HoaDon.MaHo == HoGiaDinh.MaHo
+        )
+
+        if nam:
+            query = query.filter(extract("year", HoaDon.ThangNam) == nam)
+        if thang:
+            query = query.filter(extract("month", HoaDon.ThangNam) == thang)
+
+        results = query.order_by(HoaDon.ThangNam.desc()).all()
+
+        return [
+            {
+                "ma_hoa_don": hd.MaHoaDon,
+                "ma_ho": hd.MaHo,
+                "ma_phong": ho.MaPhong,
+                "ten_chu_ho": ho.TenChuHo,
+                "thang_nam": str(hd.ThangNam),
+                "tong_tien": hd.TongTien,
+                "trang_thai_thanh_toan": hd.TrangThaiThanhToan,
+            }
+            for hd, ho in results
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi lọc hóa đơn: {str(e)}")
+

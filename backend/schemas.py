@@ -16,12 +16,32 @@ class HoGiaDinhCreate(BaseModel):
     TenChuHo: str
     SoDienThoai: str
     MaPhong: str
+    DiaChi: Optional[str] = None
+    GioiTinh: Optional[str] = None       # 'Nam' | 'Nữ' | 'Khác'
+    DonGiaDien: Optional[float] = None   # Tùy chọn, mặc định 3500
+    DonGiaNuoc: Optional[float] = None   # Tùy chọn, mặc định 15000
+
+    @field_validator("GioiTinh")
+    @classmethod
+    def gioi_tinh_hop_le(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("Nam", "Nữ", "Khác"):
+            raise ValueError("GioiTinh phải là 'Nam', 'Nữ' hoặc 'Khác'")
+        return v
 
 
 class HoGiaDinhUpdate(BaseModel):
     TenChuHo: Optional[str] = None
     SoDienThoai: Optional[str] = None
     MaPhong: Optional[str] = None
+    DiaChi: Optional[str] = None
+    GioiTinh: Optional[str] = None
+
+    @field_validator("GioiTinh")
+    @classmethod
+    def gioi_tinh_hop_le(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("Nam", "Nữ", "Khác"):
+            raise ValueError("GioiTinh phải là 'Nam', 'Nữ' hoặc 'Khác'")
+        return v
 
 
 class HoGiaDinhResponse(BaseModel):
@@ -29,6 +49,8 @@ class HoGiaDinhResponse(BaseModel):
     TenChuHo: str
     SoDienThoai: str
     MaPhong: str
+    DiaChi: Optional[str] = None
+    GioiTinh: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -154,6 +176,7 @@ class AIInsightResponse(BaseModel):
     MaHoaDon: str
     NoiDungNhanXet: str
     MucDoCanhBao: str
+    DuLieuBieuDo: Optional[list[int]] = None  # Mảng tiêu thụ 3 kỳ gần nhất
 
     model_config = {"from_attributes": True}
 

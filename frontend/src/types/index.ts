@@ -7,6 +7,8 @@ export interface HoGiaDinh {
   TenChuHo: string;
   SoDienThoai: string;
   MaPhong: string;
+  DiaChi?: string | null;
+  GioiTinh?: string | null;
 }
 
 export interface DongHo {
@@ -35,9 +37,10 @@ export interface HoaDon {
 export interface PhanTichAI {
   MaDanhGia: string;
   MaHoaDon: string;
-  MucDoCanhBao: 'warning' | 'normal' | 'danger';
+  MucDoCanhBao: 'warning' | 'normal' | 'danger' | 'Bình thường' | 'Cao' | 'Nguy hiểm';
   NoiDungNhanXet: string;
-  GoiYTietKiem: string[];
+  GoiYTietKiem?: string[];
+  DuLieuBieuDo?: number[]; // Added for requirement 6
 }
 
 export type TabId = 'dashboard' | 'meter' | 'bill';

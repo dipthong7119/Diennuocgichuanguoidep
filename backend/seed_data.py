@@ -39,11 +39,16 @@ def seed():
         # ── 2. Tạo hộ gia đình ───────────────────────────────────────────────
         if not db.query(HoGiaDinh).first():
             db.add_all([
-                HoGiaDinh(MaHo="HO-001", TenChuHo="Nguyễn Văn An", SoDienThoai="0901234567", MaPhong="P101"),
-                HoGiaDinh(MaHo="HO-002", TenChuHo="Trần Thị Bình", SoDienThoai="0912345678", MaPhong="P102"),
-                HoGiaDinh(MaHo="HO-003", TenChuHo="Lê Minh Cường", SoDienThoai="0923456789", MaPhong="P201"),
-                HoGiaDinh(MaHo="HO-004", TenChuHo="Phạm Thị Dung", SoDienThoai="0934567890", MaPhong="P202"),
-                HoGiaDinh(MaHo="HO-005", TenChuHo="Hoàng Văn Em", SoDienThoai="0945678901", MaPhong="P301"),
+                HoGiaDinh(MaHo="HO-001", TenChuHo="Nguyễn Văn An", SoDienThoai="0901234567", MaPhong="P101",
+                          DiaChi="12 Nguyễn Trãi, Q.1, TP.HCM", GioiTinh="Nam"),
+                HoGiaDinh(MaHo="HO-002", TenChuHo="Trần Thị Bình", SoDienThoai="0912345678", MaPhong="P102",
+                          DiaChi="45 Lê Lợi, Q.3, TP.HCM", GioiTinh="Nữ"),
+                HoGiaDinh(MaHo="HO-003", TenChuHo="Lê Minh Cường", SoDienThoai="0923456789", MaPhong="P201",
+                          DiaChi="78 Hai Bà Trưng, Q.Bình Thạnh, TP.HCM", GioiTinh="Nam"),
+                HoGiaDinh(MaHo="HO-004", TenChuHo="Phạm Thị Dung", SoDienThoai="0934567890", MaPhong="P202",
+                          DiaChi="23 Võ Văn Tần, Q.3, TP.HCM", GioiTinh="Nữ"),
+                HoGiaDinh(MaHo="HO-005", TenChuHo="Hoàng Văn Em", SoDienThoai="0945678901", MaPhong="P301",
+                          DiaChi="56 Phạm Ngọc Thạch, Q.3, TP.HCM", GioiTinh="Nam"),
             ])
             print("[+] Đã tạo 5 hộ gia đình")
 

@@ -1,5 +1,7 @@
 1. Quản lý Hộ gia đình — /ho-gia-dinh
 CRUD đầy đủ: thêm, sửa, xóa, xem danh sách/chi tiết hộ gia đình.
+Các trường: MaHo, TenChuHo, SoDienThoai, MaPhong, DiaChi (mới), GioiTinh (mới).
+Khi tạo hộ mới, tự động tạo kèm 2 đồng hồ (Điện + Nước).
 
 2. Quản lý Đồng hồ — /dong-ho
 CRUD đồng hồ điện/nước. Hỗ trợ lọc đồng hồ theo từng hộ. Validation loại đồng hồ (Điện / Nước) và đơn giá phải > 0.
@@ -15,6 +17,28 @@ Truy vấn 3 tháng lịch sử tiêu thụ
 Tích hợp Google Gemini hoặc OpenAI (đọc từ .env)
 Tự động phân loại mức cảnh báo: Bình thường / Cao / Nguy hiểm
 Lưu kết quả vào CSDL
+Chatbot hỏi-đáp hỗ trợ cả kiến thức chung (mẹo tiết kiệm, thiết bị...) ngoài dữ liệu hộ.
+
+6. Thống kê nâng cao — /thong-ke
+- Xếp hạng tiêu thụ: GET /thong-ke/xep-hang?loai=Dien&thang=2026-03&sap_xep=giam_dan
+- Lọc hóa đơn: GET /thong-ke/hoa-don-loc?nam=2026&thang=3
+
 vào xem các API :http://localhost:8000/docs.
 vào xem UI :http://localhost:8000.
 khởi động server thì chạy: python -m uvicorn main:app --reload (trỏ vào thư mục rồi chạy).
+
+## Lưu ý khi cập nhật cột mới (DiaChi, GioiTinh)
+
+Nếu đã có file `database.db` cũ (trước khi thêm cột DiaChi, GioiTinh), bạn cần:
+
+**Cách 1 (đơn giản):** Xóa file `database.db` rồi chạy lại seed:
+```bash
+del database.db
+python seed_data.py
+```
+
+**Cách 2 (giữ dữ liệu):** Chạy migration thủ công:
+```sql
+ALTER TABLE HoGiaDinh ADD COLUMN DiaChi TEXT;
+ALTER TABLE HoGiaDinh ADD COLUMN GioiTinh TEXT;
+```
