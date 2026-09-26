@@ -26,23 +26,31 @@ router = APIRouter(prefix="/ai-insight", tags=["Phân Tích AI"])
 # ── Constants ─────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
     "System: Bạn là trợ lý phân tích hóa đơn điện nước. "
-    "Chỉ nhận xét từ dữ liệu được cung cấp, không tự tạo số liệu."
+    "Chỉ nhận xét từ dữ liệu được cung cấp, không tự tạo số liệu. "
+    "Hãy trả lời NGẮN GỌN: tối đa 3-4 câu nhận xét chính và tối đa 3 gạch đầu dòng gợi ý tiết kiệm. "
+    "Không lặp lại số liệu thô dài dòng."
 )
 
 USER_PROMPT_TEMPLATE = (
     "User: Lịch sử tiêu thụ 3 tháng qua: {mang_lich_su_dien_nuoc}. "
-    "Hãy tóm tắt biến động và chỉ ra tháng cần kiểm tra rò rỉ nếu có, gợi ý cách tiết kiệm."
+    "Hãy tóm tắt biến động và chỉ ra tháng cần kiểm tra rò rỉ nếu có, gợi ý cách tiết kiệm. "
+    "Trả lời ngắn gọn."
 )
 
 # System prompt riêng cho tính năng Hỏi-đáp có truy vấn dữ liệu (retrieval theo hộ).
 # Ràng buộc: CHỈ được trả lời dựa trên dữ liệu truy vấn được cung cấp trong prompt,
 # không tự bịa số liệu, không suy đoán ngoài phạm vi dữ liệu.
 QUERY_SYSTEM_PROMPT = (
-    "System: Bạn là trợ lý tra cứu hóa đơn điện nước cho một hộ gia đình. "
-    "Bạn CHỈ được trả lời dựa trên dữ liệu lịch sử tiêu thụ/hóa đơn được cung cấp bên dưới "
-    "(đây là kết quả truy vấn thật từ cơ sở dữ liệu của hộ). "
-    "Không tự tạo số liệu, không suy đoán về hộ khác. "
-    "Nếu dữ liệu không đủ để trả lời, hãy nói rõ là không đủ dữ liệu thay vì đoán."
+    "System: Bạn là trợ lý thông minh về điện nước cho hộ gia đình. "
+    "Bạn có 2 chế độ trả lời:\n"
+    "1. Nếu câu hỏi LIÊN QUAN đến dữ liệu tiêu thụ/hóa đơn của hộ (có dữ liệu được cung cấp bên dưới): "
+    "Bắt buộc trả lời DỰA TRÊN DỮ LIỆU THẬT, không bịa số liệu. "
+    "Ghi rõ đây là 'dựa trên dữ liệu thực tế của bạn'.\n"
+    "2. Nếu câu hỏi KHÔNG liên quan đến dữ liệu hộ (ví dụ: mẹo tiết kiệm điện chung, "
+    "kiến thức phổ thông, gợi ý thiết bị...): Cho phép trả lời bằng kiến thức chung. "
+    "Ghi rõ đây là 'gợi ý/kiến thức chung, tham khảo thêm nguồn khác'. "
+    "KHÔNG được bịa số liệu của hộ khi trả lời câu hỏi chung.\n"
+    "Luôn phân biệt rõ trong câu trả lời đâu là dữ liệu thật và đâu là gợi ý chung."
 )
 
 MUC_DO_CANH_BAO = {
@@ -307,6 +315,33 @@ def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
             lines.append(f"💰 Tổng hóa đơn: **{int(recs[0]['tong_tien_hoa_don_thang']):,} đ** — {trang_thai}")
         return "\n".join(lines)
 
+    # ── Câu hỏi kiến thức chung (mẹo tiết kiệm, thiết bị, ...) ──────────
+    general_keywords = [
+        "mẹo", "meo", "tiết kiệm", "tiet kiem", "cách", "cach", "làm sao", "lam sao",
+        "thiết bị", "thiet bi", "nên", "nen", "gợi ý", "goi y", "khuyên", "khuyen",
+        "tại sao", "tai sao", "vì sao", "vi sao", "giải thích", "giai thich",
+        "công suất", "cong suat", "giá điện", "gia dien", "giá nước", "gia nuoc",
+    ]
+    if any(k in q for k in general_keywords):
+        lines = [
+            "💡 **Gợi ý / Kiến thức chung** *(tham khảo thêm nguồn khác)*:\n",
+        ]
+        if any(k in q for k in ["tiết kiệm", "tiet kiem", "mẹo", "meo"]):
+            lines.extend([
+                "• Tắt thiết bị khi không sử dụng, rút phích cắm để tránh điện chờ.",
+                "• Sử dụng đèn LED thay bóng sợi đốt, tiết kiệm đến 80% điện chiếu sáng.",
+                "• Đặt điều hòa 26-28°C, vệ sinh lọc gió định kỳ.",
+                "• Kiểm tra vòi nước, bồn cầu tránh rò rỉ ngầm.",
+                "• Sử dụng máy giặt/rửa bát đầy tải để tối ưu nước và điện.",
+            ])
+        else:
+            lines.extend([
+                "• Điều hòa là thiết bị tiêu thụ điện nhiều nhất (1-3 kWh/giờ).",
+                "• Bình nóng lạnh nên đặt hẹn giờ thay vì bật cả ngày.",
+                "• 1 m³ nước ≈ 1000 lít — một vòi rò rỉ có thể lãng phí 15 m³/tháng.",
+            ])
+        return "\n".join(lines)
+
     # ── Câu trả lời mặc định (không khớp câu hỏi nào) ───────────────────────
     thang_list = sorted(set(r["thang"] for r in du_lieu))
     lines = [
@@ -317,6 +352,7 @@ def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
         "  • Hóa đơn tháng [X] là bao nhiêu?",
         "  • Tháng nào chưa thanh toán?",
         "  • Tóm tắt lịch sử tiêu thụ",
+        "  • Mẹo tiết kiệm điện nước",
         "",
         "💡 *Để có phân tích AI nâng cao bằng ngôn ngữ tự nhiên, hãy cấu hình*",
         "   *`GEMINI_API_KEY` trong file `.env` (miễn phí tại aistudio.google.com)*",
@@ -404,7 +440,16 @@ def generate_ai_insight(
         db.add(phan_tich)
         db.commit()
         db.refresh(phan_tich)
-        return phan_tich
+
+        # 9. Trả về kèm DuLieuBieuDo (không lưu vào DB, chỉ trả kèm response)
+        from schemas import AIInsightResponse
+        return AIInsightResponse(
+            MaDanhGia=phan_tich.MaDanhGia,
+            MaHoaDon=phan_tich.MaHoaDon,
+            NoiDungNhanXet=phan_tich.NoiDungNhanXet,
+            MucDoCanhBao=phan_tich.MucDoCanhBao,
+            DuLieuBieuDo=mang_tieu_thu,
+        )
 
     except HTTPException:
         raise
@@ -462,15 +507,15 @@ def hoi_dap_ai(
     current_user: dict = Depends(require_login),   # phải đăng nhập
 ):
     """
-    Cho phép người dùng đặt câu hỏi tự do (VD: "Tháng nào tôi dùng điện nhiều nhất
-    trong 6 tháng qua?", "Hóa đơn tháng trước tôi đã thanh toán chưa?"...).
+    Cho phép người dùng đặt câu hỏi tự do về dữ liệu tiêu thụ/hóa đơn hoặc câu hỏi chung.
 
-    Luồng xử lý (retrieval → augmentation → generation):
-    1. **Truy vấn (Retrieval)**: lấy tối đa 12 kỳ chỉ số/hóa đơn gần nhất của
-       CHÍNH hộ đang hỏi từ CSDL, ẩn danh hóa (không có tên/SĐT/mã phòng).
-    2. **Augmentation**: chèn dữ liệu vừa truy vấn được vào prompt cùng câu hỏi.
-    3. **Generation**: LLM chỉ được trả lời dựa trên dữ liệu đã truy vấn,
-       không được tự bịa số liệu ngoài phạm vi được cung cấp.
+    Luồng xử lý:
+    1. **Truy vấn (Retrieval)**: lấy tối đa 12 kỳ chỉ số/hóa đơn gần nhất của hộ từ CSDL,
+       ẩn danh hóa (không có tên/SĐT/mã phòng).
+    2. **Augmentation**: chèn dữ liệu và câu hỏi vào prompt.
+    3. **Generation**: AI trả lời dựa trên dữ liệu nếu câu hỏi về dữ liệu hộ;
+       hoặc trả lời bằng kiến thức chung nếu câu hỏi ngoài phạm vi dữ liệu hộ
+       (ví dụ: mẹo tiết kiệm điện, kiến thức phổ thông, gợi ý thiết bị).
 
     - **Admin**: hỏi về bất kỳ hộ nào.
     - **User thường**: chỉ hỏi về hộ của chính mình.

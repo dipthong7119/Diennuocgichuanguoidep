@@ -29,6 +29,8 @@ class HoGiaDinh(Base):
     TenChuHo      = Column(String, nullable=False)
     SoDienThoai   = Column(String, nullable=False)
     MaPhong       = Column(String, nullable=False)
+    DiaChi        = Column(String, nullable=True)     # Địa chỉ hộ gia đình
+    GioiTinh      = Column(String, nullable=True)     # 'Nam' | 'Nữ' | 'Khác'
 
 
 class DongHo(Base):
