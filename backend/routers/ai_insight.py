@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import List
 from dotenv import load_dotenv
-from urllib.parse import urlencode
 from urllib.request import Request as URLRequest, urlopen
 
 from database import get_db, HoaDon, ChiSoTieuThu, DongHo, PhanTichAI
@@ -127,7 +126,7 @@ def _goi_ai_raw(system_prompt: str, user_prompt: str, fallback) -> str:
     provider = os.getenv("AI_PROVIDER", "gemini").lower()
     full_prompt = f"{system_prompt}\n\n{user_prompt}"
 
-    # ── Gemini (ưu tiên google.genai SDK mới) ─────────────────────────────────
+    # ── Gemini REST API (header x-goog-api-key hỗ trợ AQ auth keys) ───────────
     if provider == "gemini":
         api_key = os.getenv("GEMINI_API_KEY", "")
         if not api_key or api_key == "your_gemini_api_key_here":
@@ -144,23 +143,27 @@ def _goi_ai_raw(system_prompt: str, user_prompt: str, fallback) -> str:
 
         for model_name in models_to_try:
             try:
-                # Thử google.genai SDK mới trước
-                try:
-                    from google import genai as genai_new
-                    client = genai_new.Client(api_key=api_key)
-                    response = client.models.generate_content(
-                        model=model_name, contents=full_prompt
-                    )
-                    return response.text
-                except ImportError:
-                    pass
-
-                # Fallback: google.generativeai cũ
-                import google.generativeai as genai_old
-                genai_old.configure(api_key=api_key)
-                model = genai_old.GenerativeModel(model_name=model_name)
-                response = model.generate_content(full_prompt)
-                return response.text
+                endpoint = (
+                    "https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"{model_name}:generateContent"
+                )
+                payload = {"contents": [{"parts": [{"text": full_prompt}]}]}
+                request = URLRequest(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": api_key,
+                    },
+                    method="POST",
+                )
+                with urlopen(request, timeout=30) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                parts = (result.get("candidates") or [{}])[0].get("content", {}).get("parts", [])
+                answer = "\n".join(part["text"] for part in parts if part.get("text"))
+                if not answer:
+                    raise ValueError("Gemini trả về nội dung trống")
+                return answer
 
             except Exception as e:
                 err_str = str(e)
@@ -208,10 +211,7 @@ def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str
         return fallback(), []
 
     model_name = os.getenv("GEMINI_SEARCH_MODEL", "gemini-2.5-flash")
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model_name}:generateContent?{urlencode({'key': api_key})}"
-    )
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"parts": [{"text": user_prompt}]}],
@@ -223,7 +223,10 @@ def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str
         request = URLRequest(
             endpoint,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": api_key,
+            },
             method="POST",
         )
         with urlopen(request, timeout=30) as response:
