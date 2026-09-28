@@ -43,4 +43,4 @@ export interface PhanTichAI {
   DuLieuBieuDo?: number[]; // Added for requirement 6
 }
 
-export type TabId = 'dashboard' | 'meter' | 'bill';
+export type TabId = 'dashboard' | 'meter' | 'bill' | 'invoices' | 'users';

@@ -8,6 +8,8 @@ import SideNav from './components/SideNav.tsx';
 import DashboardTab from './components/DashboardTab';
 import MeterTab from './components/MeterTab';
 import BillTab from './components/BillTab';
+import AdminInvoicesTab from './components/AdminInvoicesTab';
+import AdminUsersTab from './components/AdminUsersTab';
 
 interface AuthUser {
   username: string;
@@ -83,6 +85,8 @@ export default function App() {
             {activeTab === 'dashboard' && <DashboardTab userRole={user.role} userMaHo={user.ma_ho} onSessionExpired={clearSession} />}
             {activeTab === 'meter' && <MeterTab userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
             {activeTab === 'bill' && <BillTab userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
+            {activeTab === 'invoices' && user.role === 'admin' && <AdminInvoicesTab onSessionExpired={clearSession} />}
+            {activeTab === 'users' && user.role === 'admin' && <AdminUsersTab onSessionExpired={clearSession} />}
           </main>
           <BottomNav activeTab={activeTab} onTabChange={setActiveTab} userRole={user.role} />
         </div>
@@ -112,6 +116,8 @@ export default function App() {
               {activeTab === 'dashboard' && <DashboardTab desktop userRole={user.role} userMaHo={user.ma_ho} onSessionExpired={clearSession} />}
               {activeTab === 'meter' && <MeterTab desktop userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
               {activeTab === 'bill' && <BillTab desktop userMaHo={user.ma_ho} userRole={user.role} onSessionExpired={clearSession} />}
+              {activeTab === 'invoices' && user.role === 'admin' && <AdminInvoicesTab onSessionExpired={clearSession} />}
+              {activeTab === 'users' && user.role === 'admin' && <AdminUsersTab onSessionExpired={clearSession} />}
             </div>
           </main>
         </div>

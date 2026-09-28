@@ -1,4 +1,4 @@
-import { LayoutDashboard, ClipboardEdit, Receipt, Eye } from 'lucide-react';
+import { LayoutDashboard, ClipboardEdit, Receipt, Eye, FileText, Users } from 'lucide-react';
 import type { TabId } from '../types';
 
 interface BottomNavProps {
@@ -15,16 +15,22 @@ export default function BottomNav({ activeTab, onTabChange, userRole = 'admin' }
     { id: 'meter', label: isAdmin ? 'Nhập số' : 'Chỉ số', icon: isAdmin ? ClipboardEdit : Eye },
     { id: 'bill', label: 'Hóa đơn', icon: Receipt },
   ];
+  if (isAdmin) {
+    tabs.push(
+      { id: 'invoices', label: 'Danh sách hóa đơn', icon: FileText },
+      { id: 'users', label: 'Danh sách người dùng', icon: Users },
+    );
+  }
   return (
     <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 z-50">
-      <div className="flex items-center justify-around py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+      <div className="flex items-center justify-around px-1 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
         {tabs.map(({ id, label, icon: Icon }) => {
           const isActive = activeTab === id;
           return (
             <button
               key={id}
               onClick={() => onTabChange(id)}
-              className={`flex flex-col items-center gap-0.5 py-1 px-4 rounded-xl transition-all duration-200 ${isActive
+              className={`flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl px-1 py-1 transition-all duration-200 ${isActive
                   ? 'text-[#0068FF]'
                   : 'text-gray-400 hover:text-gray-600'
                 }`}
@@ -33,7 +39,7 @@ export default function BottomNav({ activeTab, onTabChange, userRole = 'admin' }
                 }`}>
                 <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
               </div>
-              <span className={`text-[10px] leading-tight ${isActive ? 'font-semibold' : 'font-medium'}`}>
+              <span className={`line-clamp-2 max-w-[76px] text-center text-[9px] leading-3 ${isActive ? 'font-semibold' : 'font-medium'}`}>
                 {label}
               </span>
             </button>

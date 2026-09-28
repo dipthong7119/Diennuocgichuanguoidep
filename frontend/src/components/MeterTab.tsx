@@ -325,59 +325,60 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
       const dhNuoc = dongHoList.find(d => d.MaHo === selectedHo && d.Loai === 'Nuoc');
 
       const thangNam = CURRENT_PERIOD;
-      const promises = [];
+      const readings: Array<{
+        MaChiSo: string;
+        MaDongHo: string;
+        ThangNam: string;
+        ChiSoCu: number;
+        ChiSoMoi: number;
+        ThayDongHo: boolean;
+      }> = [];
 
       if (dienMoi !== null && dhDien && dienCu) {
-        promises.push(
-          fetch('/chi-so/', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              MaChiSo: `CS-ADMIN-${Date.now()}-D`,
-              MaDongHo: dhDien.MaDongHo,
-              ThangNam: thangNam,
-              ChiSoCu: dienCu.ChiSoMoi,
-              ChiSoMoi: dienMoi,
-              ThayDongHo: dienThayDongHo,
-            }),
-          })
-        );
+        readings.push({
+          MaChiSo: `CS-ADMIN-${Date.now()}-D`,
+          MaDongHo: dhDien.MaDongHo,
+          ThangNam: thangNam,
+          ChiSoCu: dienCu.ChiSoMoi,
+          ChiSoMoi: dienMoi,
+          ThayDongHo: dienThayDongHo,
+        });
       }
 
       if (nuocMoi !== null && dhNuoc && nuocCu) {
-        promises.push(
-          fetch('/chi-so/', {
-            method: 'POST',
-            headers,
-            body: JSON.stringify({
-              MaChiSo: `CS-ADMIN-${Date.now()}-N`,
-              MaDongHo: dhNuoc.MaDongHo,
-              ThangNam: thangNam,
-              ChiSoCu: nuocCu.ChiSoMoi,
-              ChiSoMoi: nuocMoi,
-              ThayDongHo: nuocThayDongHo,
-            }),
-          })
-        );
+        readings.push({
+          MaChiSo: `CS-ADMIN-${Date.now()}-N`,
+          MaDongHo: dhNuoc.MaDongHo,
+          ThangNam: thangNam,
+          ChiSoCu: nuocCu.ChiSoMoi,
+          ChiSoMoi: nuocMoi,
+          ThayDongHo: nuocThayDongHo,
+        });
       }
 
-      // Gọi API (nếu thất bại thì fallback mock)
-      if (promises.length > 0) {
-        const results = await Promise.allSettled(promises);
-        // Lấy MaHoaDon để kích hoạt AI
-        for (const r of results) {
-          if (r.status === 'fulfilled' && r.value.ok) {
-            const data = await r.value.json();
-            const maHoaDon = data?.hoa_don?.MaHoaDon;
-            if (maHoaDon) {
-              // Kích hoạt AI phân tích
-              fetch('/ai-insight/generate', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify({ ma_hoa_don: maHoaDon, ma_ho: selectedHo }),
-              }).catch(() => {});
-            }
-          }
+      // Ghi lần lượt để hóa đơn đã có đủ cả điện và nước trước khi AI phân tích.
+      let maHoaDon: string | null = null;
+      for (const reading of readings) {
+        const response = await fetch('/chi-so/', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reading),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data?.detail || 'Không lưu được chỉ số.');
+        }
+        maHoaDon = data?.hoa_don?.MaHoaDon || maHoaDon;
+      }
+
+      if (maHoaDon) {
+        const analysisResponse = await fetch('/ai-insight/generate', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ ma_hoa_don: maHoaDon, ma_ho: selectedHo }),
+        });
+        if (!analysisResponse.ok) {
+          throw new Error('Chỉ số đã lưu, nhưng phân tích AI chưa hoàn tất. Mở hóa đơn để thử lại.');
         }
       }
 
@@ -388,17 +389,9 @@ function AdminMeterForm({ desktop = false }: { desktop?: boolean }) {
       setDienThayDongHo(false);
       setNuocThayDongHo(false);
       setTimeout(() => setSubmitSuccess(false), 4000);
-    } catch {
-      // Fallback giả lập
-      setTimeout(() => {
-        setIsSubmitting(false);
-        setSubmitSuccess(true);
-        setDienMoiStr('');
-        setNuocMoiStr('');
-        setDienThayDongHo(false);
-        setNuocThayDongHo(false);
-        setTimeout(() => setSubmitSuccess(false), 4000);
-      }, 1500);
+    } catch (error) {
+      setIsSubmitting(false);
+      setSubmitError(error instanceof Error ? error.message : 'Không thể lưu chỉ số và phân tích hóa đơn.');
     }
   }
 

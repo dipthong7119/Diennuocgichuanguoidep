@@ -1,202 +1,113 @@
-import { useState, useEffect } from 'react';
-import { Trophy, Filter, Search, Calendar } from 'lucide-react';
-import { formatVND, formatThang } from '../data/mockData';
+import { useEffect, useState } from 'react';
+import { Trophy } from 'lucide-react';
+import { formatThang } from '../data/mockData';
+
+interface RankingItem {
+  ma_ho: string;
+  ma_phong: string;
+  ten_chu_ho: string;
+  tieu_thu: number;
+  loai: string;
+}
 
 export default function AdminDashboardTable({ token }: { token: string | null }) {
-  const [activeTab, setActiveTab] = useState<'ranking' | 'invoices'>('ranking');
-  const [rankingData, setRankingData] = useState<any[]>([]);
-  const [invoiceData, setInvoiceData] = useState<any[]>([]);
-
-  // Filtering state
-  const [rankingLoai, setRankingLoai] = useState<'Dien' | 'Nuoc'>('Dien');
-  const [rankingThang, setRankingThang] = useState('');
-  const [rankingSapXep, setRankingSapXep] = useState<'giam_dan' | 'tang_dan'>('giam_dan');
-
-  const [invoiceNam, setInvoiceNam] = useState('');
-  const [invoiceThang, setInvoiceThang] = useState('');
-
+  const [rankingData, setRankingData] = useState<RankingItem[]>([]);
+  const [loai, setLoai] = useState<'Dien' | 'Nuoc'>('Dien');
+  const [thang, setThang] = useState('');
+  const [sapXep, setSapXep] = useState<'giam_dan' | 'tang_dan'>('giam_dan');
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (!token) return;
+    const params = new URLSearchParams({ loai, sap_xep: sapXep });
+    if (thang) params.append('thang', thang);
     setIsLoading(true);
 
-    if (activeTab === 'ranking') {
-      const params = new URLSearchParams({ loai: rankingLoai, sap_xep: rankingSapXep });
-      if (rankingThang) params.append('thang', rankingThang);
-
-      fetch(`/thong-ke/xep-hang?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => res.json())
-        .then(data => Array.isArray(data) ? setRankingData(data) : setRankingData([]))
-        .catch(console.error)
-        .finally(() => setIsLoading(false));
-    } else {
-      const params = new URLSearchParams();
-      if (invoiceNam) params.append('nam', invoiceNam);
-      if (invoiceThang) params.append('thang', invoiceThang);
-
-      fetch(`/thong-ke/hoa-don-loc?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
-        .then(res => res.json())
-        .then(data => Array.isArray(data) ? setInvoiceData(data) : setInvoiceData([]))
-        .catch(console.error)
-        .finally(() => setIsLoading(false));
-    }
-  }, [activeTab, rankingLoai, rankingThang, rankingSapXep, invoiceNam, invoiceThang, token]);
+    fetch(`/thong-ke/xep-hang?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => res.json())
+      .then(data => setRankingData(Array.isArray(data) ? data : []))
+      .catch(() => setRankingData([]))
+      .finally(() => setIsLoading(false));
+  }, [loai, sapXep, thang, token]);
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mt-6">
-      <div className="flex items-center justify-between p-5 border-b border-gray-100">
-        <h2 className="text-base font-semibold text-[#141415]">Quản lý nâng cao</h2>
-        <div className="flex bg-gray-100 p-1 rounded-xl">
-          <button
-            onClick={() => setActiveTab('ranking')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'ranking' ? 'bg-white text-[#0068FF] shadow-sm' : 'text-gray-500'
-            }`}
+    <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+            <Trophy size={17} />
+          </span>
+          <div>
+            <h2 className="text-sm font-semibold text-[#141415]">Xếp hạng tiêu thụ</h2>
+            <p className="mt-0.5 text-xs text-gray-500">So sánh mức sử dụng giữa các phòng</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <select
+            aria-label="Loại tiêu thụ"
+            value={loai}
+            onChange={event => setLoai(event.target.value as 'Dien' | 'Nuoc')}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0068FF]"
           >
-            Xếp hạng
-          </button>
-          <button
-            onClick={() => setActiveTab('invoices')}
-            className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'invoices' ? 'bg-white text-[#0068FF] shadow-sm' : 'text-gray-500'
-            }`}
+            <option value="Dien">Điện</option>
+            <option value="Nuoc">Nước</option>
+          </select>
+          <input
+            aria-label="Kỳ xếp hạng"
+            type="month"
+            value={thang}
+            onChange={event => setThang(event.target.value)}
+            className="rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#0068FF]"
+          />
+          <select
+            aria-label="Thứ tự xếp hạng"
+            value={sapXep}
+            onChange={event => setSapXep(event.target.value as 'giam_dan' | 'tang_dan')}
+            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#0068FF]"
           >
-            Hóa đơn
-          </button>
+            <option value="giam_dan">Cao nhất</option>
+            <option value="tang_dan">Thấp nhất</option>
+          </select>
         </div>
       </div>
 
-      <div className="p-5">
-        {activeTab === 'ranking' && (
-          <div className="space-y-4">
-            <div className="flex gap-4">
-              <select 
-                value={rankingLoai} 
-                onChange={(e) => setRankingLoai(e.target.value as any)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#0068FF]"
-              >
-                <option value="Dien">Điện</option>
-                <option value="Nuoc">Nước</option>
-              </select>
-              <input 
-                type="month" 
-                value={rankingThang} 
-                onChange={(e) => setRankingThang(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#0068FF]"
-              />
-              <select 
-                value={rankingSapXep} 
-                onChange={(e) => setRankingSapXep(e.target.value as any)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#0068FF]"
-              >
-                <option value="giam_dan">Cao nhất</option>
-                <option value="tang_dan">Thấp nhất</option>
-              </select>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 text-gray-500">
-                    <th className="py-3 px-4 font-medium w-16">Top</th>
-                    <th className="py-3 px-4 font-medium">Phòng</th>
-                    <th className="py-3 px-4 font-medium">Chủ hộ</th>
-                    <th className="py-3 px-4 font-medium">Tiêu thụ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rankingData.map((item, idx) => (
-                    <tr key={item.ma_ho} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        {idx < 3 ? (
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${
-                            idx === 0 ? 'bg-amber-400' : idx === 1 ? 'bg-gray-300' : 'bg-amber-700'
-                          }`}>
-                            {idx + 1}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400 font-semibold pl-2">{idx + 1}</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-4 font-semibold text-[#141415]">{item.ma_phong}</td>
-                      <td className="py-3 px-4 text-gray-600">{item.ten_chu_ho}</td>
-                      <td className="py-3 px-4 font-bold text-[#0068FF]">
-                        {item.tieu_thu} {item.loai === 'Dien' ? 'kWh' : 'm³'}
-                      </td>
-                    </tr>
-                  ))}
-                  {rankingData.length === 0 && !isLoading && (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-gray-400">Không có dữ liệu</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'invoices' && (
-          <div className="space-y-4">
-            <div className="flex gap-4">
-              <input 
-                type="number" 
-                placeholder="Năm (VD: 2026)"
-                value={invoiceNam} 
-                onChange={(e) => setInvoiceNam(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#0068FF] w-32"
-              />
-              <input 
-                type="number" 
-                placeholder="Tháng (1-12)"
-                min="1" max="12"
-                value={invoiceThang} 
-                onChange={(e) => setInvoiceThang(e.target.value)}
-                className="text-sm border border-gray-200 rounded-lg px-3 py-2 outline-none focus:border-[#0068FF] w-32"
-              />
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-gray-100 text-gray-500">
-                    <th className="py-3 px-4 font-medium">Mã HĐ</th>
-                    <th className="py-3 px-4 font-medium">Phòng</th>
-                    <th className="py-3 px-4 font-medium">Chủ hộ</th>
-                    <th className="py-3 px-4 font-medium">Kỳ hóa đơn</th>
-                    <th className="py-3 px-4 font-medium text-right">Tổng tiền</th>
-                    <th className="py-3 px-4 font-medium text-center">Trạng thái</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoiceData.map((item) => (
-                    <tr key={item.ma_hoa_don} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-3 px-4 text-xs font-mono text-gray-500">{item.ma_hoa_don}</td>
-                      <td className="py-3 px-4 font-semibold text-[#141415]">{item.ma_phong}</td>
-                      <td className="py-3 px-4 text-gray-600">{item.ten_chu_ho}</td>
-                      <td className="py-3 px-4">{formatThang(item.thang_nam)}</td>
-                      <td className="py-3 px-4 text-right font-semibold">{formatVND(item.tong_tien)}</td>
-                      <td className="py-3 px-4 text-center">
-                        <span className={`inline-block px-2 py-1 rounded-md text-[10px] font-semibold ${
-                          item.trang_thai_thanh_toan ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'
-                        }`}>
-                          {item.trang_thai_thanh_toan ? 'Đã thu' : 'Chưa thu'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {invoiceData.length === 0 && !isLoading && (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-gray-400">Không có dữ liệu</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[540px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 text-xs text-gray-500">
+              <th className="w-20 px-5 py-3 font-medium">Hạng</th>
+              <th className="px-4 py-3 font-medium">Phòng</th>
+              <th className="px-4 py-3 font-medium">Chủ hộ</th>
+              <th className="px-5 py-3 text-right font-medium">Tiêu thụ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rankingData.map((item, index) => (
+              <tr key={item.ma_ho} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/70">
+                <td className="px-5 py-3">
+                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
+                    index === 0 ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'
+                  }`}>{index + 1}</span>
+                </td>
+                <td className="px-4 py-3 font-semibold text-[#141415]">{item.ma_phong}</td>
+                <td className="px-4 py-3 text-gray-600">{item.ten_chu_ho}</td>
+                <td className="px-5 py-3 text-right font-semibold text-[#0068FF]">
+                  {item.tieu_thu} {item.loai === 'Dien' ? 'kWh' : 'm³'}
+                </td>
+              </tr>
+            ))}
+            {!isLoading && rankingData.length === 0 && (
+              <tr><td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400">Chưa có dữ liệu cho kỳ này.</td></tr>
+            )}
+            {isLoading && (
+              <tr><td colSpan={4} className="px-5 py-10 text-center text-sm text-gray-400">Đang tải dữ liệu…</td></tr>
+            )}
+          </tbody>
+        </table>
       </div>
-    </div>
+      {thang && <p className="px-5 py-3 text-xs text-gray-400">Kỳ {formatThang(thang)}</p>}
+    </section>
   );
 }

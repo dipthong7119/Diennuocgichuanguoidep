@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import {
   Zap, Droplets, CheckCircle, XCircle, Sparkles, Lightbulb,
   Printer, CreditCard, ChevronDown, ChevronUp, Shield, Loader2, MessageCircle, Send, TrendingUp
 } from 'lucide-react';
-import { BarChart, Bar, ResponsiveContainer, Cell, Tooltip } from 'recharts';
+import { BarChart, Bar, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   hoGiaDinhList, dongHoList
 } from '../data/mockData';
@@ -24,7 +24,7 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
   const [selectedHo, setSelectedHo] = useState(defaultMaHo);
   const [aiExpanded, setAiExpanded] = useState(true);
 
-  type ChatMsg = { role: 'user' | 'ai'; text: string };
+  type ChatMsg = { role: 'user' | 'ai'; text: string; sources?: { title: string; url: string }[] };
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([]);
   const [cauHoi, setCauHoi] = useState('');
   const [hoiDapLoading, setHoiDapLoading] = useState(false);
@@ -41,6 +41,7 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
   const [dienHistory, setDienHistory] = useState<any[]>([]);
   const [nuocHistory, setNuocHistory] = useState<any[]>([]);
   const [generatingAI, setGeneratingAI] = useState(false);
+  const [aiError, setAiError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   // Lấy danh sách hóa đơn và chỉ số từ backend
@@ -80,39 +81,38 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
     }
   }, [selectedHo]);
 
-  // Lấy AI insight khi chọn hóa đơn
+  // Tự lấy hoặc tạo phân tích AI khi mở một hóa đơn, không yêu cầu bấm nút.
   useEffect(() => {
     if (!selectedBillId) { setAiInsight(null); return; }
     const token = localStorage.getItem('token');
-    fetch(`/ai-insight/${selectedBillId}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(res => res.json())
-      .then(data => {
-        if (Array.isArray(data) && data.length > 0) {
-          setAiInsight(data[0]);
-        } else {
-          setAiInsight(null);
-        }
-      })
-      .catch(console.error);
-  }, [selectedBillId]);
-
-  function handleGenerateAI() {
-    if (!selectedBillId) return;
+    if (!token) return;
+    let cancelled = false;
+    setAiInsight(null);
     setGeneratingAI(true);
-    const token = localStorage.getItem('token');
-    fetch(`/ai-insight/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ ma_ho: selectedHo, ma_hoa_don: selectedBillId })
-    })
-    .then(async res => {
-      const data = await res.json();
-      if (res.ok) setAiInsight(data);
-      else alert(data.detail || 'Lỗi khi tạo AI Insight');
-    })
-    .catch(console.error)
-    .finally(() => setGeneratingAI(false));
-  }
+    setAiError('');
+
+    fetch(`/ai-insight/${selectedBillId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async response => {
+        if (response.status === 401) { onSessionExpired?.(); return null; }
+        const data = await response.json();
+        if (Array.isArray(data) && data.length > 0) return data[0];
+        const generated = await fetch('/ai-insight/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ma_ho: selectedHo, ma_hoa_don: selectedBillId }),
+        });
+        if (!generated.ok) {
+          const detail = await generated.json().catch(() => ({}));
+          throw new Error(detail.detail || 'Chưa thể tạo phân tích cho hóa đơn này.');
+        }
+        return generated.json();
+      })
+      .then(data => { if (!cancelled && data) setAiInsight(data); })
+      .catch(error => { if (!cancelled) setAiError(error.message || 'Không thể tạo phân tích.'); })
+      .finally(() => { if (!cancelled) setGeneratingAI(false); });
+
+    return () => { cancelled = true; };
+  }, [selectedBillId, selectedHo, onSessionExpired]);
 
   const hoaDon = bills.find(b => b.MaHoaDon === selectedBillId);
   const isActuallyPaid = hoaDon ? (localPaid[hoaDon.MaHoaDon] ?? hoaDon.TrangThaiThanhToan) : false;
@@ -196,7 +196,7 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
           return;
         }
         if (!r.ok) throw new Error(data?.detail || 'Có lỗi xảy ra, thử lại sau.');
-        setChatHistory(prev => [...prev, { role: 'ai', text: data.tra_loi }]);
+        setChatHistory(prev => [...prev, { role: 'ai', text: data.tra_loi, sources: data.sources || [] }]);
       })
       .catch((err) => {
         const errMsg = err.message || 'Không thể kết nối tới máy chủ.';
@@ -208,17 +208,49 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
 
   function renderMarkdown(text: string) {
     if (!text) return null;
-    return text.split('\n').map((line, i) => {
-      const parts = line.split(/\*\*([^*]+)\*\*/g);
-      const rendered = parts.map((part, j) =>
-        j % 2 === 1 ? <strong key={j} className="font-semibold text-[#141415]">{part}</strong> : part
+    const formatInline = (line: string, keyPrefix: string) =>
+      line.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/g).map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={`${keyPrefix}-${index}`} className="font-semibold">{part.slice(2, -2)}</strong>;
+        }
+        if (part.startsWith('*') && part.endsWith('*')) {
+          return <em key={`${keyPrefix}-${index}`}>{part.slice(1, -1)}</em>;
+        }
+        return part;
+      });
+
+    const content: ReactNode[] = [];
+    let listItems: { text: string; key: number }[] = [];
+    const flushList = () => {
+      if (!listItems.length) return;
+      content.push(
+        <ul key={`list-${listItems[0].key}`} className="my-1.5 list-disc space-y-1 pl-4 marker:text-[#0068FF]">
+          {listItems.map(item => <li key={item.key}>{formatInline(item.text, `item-${item.key}`)}</li>)}
+        </ul>,
       );
-      if (line.startsWith('  •') || line.startsWith('• ') || line.startsWith('  -') || line.startsWith('- ')) {
-        return <li key={i} className="ml-3 list-disc">{rendered}</li>;
+      listItems = [];
+    };
+
+    text.replace(/\r/g, '').split('\n').forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      if (!line) { flushList(); return; }
+
+      const bullet = line.match(/^(?:[-•*])\s+(.+)$/);
+      if (bullet) {
+        listItems.push({ text: bullet[1], key: index });
+        return;
       }
-      if (line === '') return <br key={i} />;
-      return <p key={i}>{rendered}</p>;
+
+      flushList();
+      const heading = line.match(/^#{1,3}\s+(.+)$/) || line.match(/^\*\*(.+)\*\*$/);
+      if (heading) {
+        content.push(<p key={`heading-${index}`} className="pt-1 font-semibold">{formatInline(heading[1], `heading-${index}`)}</p>);
+      } else {
+        content.push(<p key={`paragraph-${index}`}>{formatInline(line, `paragraph-${index}`)}</p>);
+      }
     });
+    flushList();
+    return <div className="space-y-1.5">{content}</div>;
   }
 
   function formatThangDisplay(thangNam: string) {
@@ -403,8 +435,8 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
               <Sparkles size={16} className="text-amber-400" />
             </div>
             <div className="text-left">
-              <h3 className="text-sm font-semibold text-white">AI Insight & Energy Advisor</h3>
-              <p className="text-[10px] text-white/50">Phân tích tự động bởi AI</p>
+              <h3 className="text-sm font-semibold text-white">Phân tích tiêu thụ</h3>
+              <p className="text-[10px] text-white/60">Tự động theo dữ liệu hóa đơn</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -421,12 +453,12 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
               <div className="flex items-center gap-1.5 mb-2">
                 <Shield size={12} className={getAlertColor(aiInsight.MucDoCanhBao).text} />
                 <span className={`text-[10px] font-semibold uppercase tracking-wide ${getAlertColor(aiInsight.MucDoCanhBao).text}`}>
-                  Nhận xét
+                  Kết quả
                 </span>
               </div>
-              <p className="text-[12px] text-gray-200 leading-relaxed">
-                {aiInsight.NoiDungNhanXet}
-              </p>
+              <div className="text-[13px] text-gray-100 leading-relaxed [&_strong]:text-white">
+                {renderMarkdown(aiInsight.NoiDungNhanXet)}
+              </div>
             </div>
             {aiInsight.GoiYTietKiem && (
               <div className={`bg-white/5 backdrop-blur-sm rounded-xl p-3 border ${getAlertColor(aiInsight.MucDoCanhBao).border}`}>
@@ -445,22 +477,27 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
                 <div className="flex items-center gap-1.5 mb-2">
                   <TrendingUp size={12} className={getAlertColor(aiInsight.MucDoCanhBao).text} />
                   <span className={`text-[10px] font-semibold uppercase tracking-wide ${getAlertColor(aiInsight.MucDoCanhBao).text}`}>
-                    Biến động 3 kỳ gần nhất
+                  Tiêu thụ 3 kỳ gần đây
                   </span>
                 </div>
                 <div className="h-24 mt-2">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={aiInsight.DuLieuBieuDo.map((val: number, idx: number) => ({ name: `Kỳ ${idx+1}`, value: val }))}>
+                    <BarChart data={aiInsight.DuLieuBieuDo} barGap={5}>
+                      <XAxis dataKey="thang" tick={{ fontSize: 9, fill: '#CBD5E1' }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="dien" hide domain={[0, 'dataMax + 10']} />
+                      <YAxis yAxisId="nuoc" orientation="right" hide domain={[0, 'dataMax + 2']} />
                       <Tooltip
                         contentStyle={{ background: '#1e293b', border: 'none', borderRadius: '8px', fontSize: '12px', color: '#fff' }}
                         itemStyle={{ color: '#fff' }}
                         cursor={{ fill: 'rgba(255,255,255,0.1)' }}
+                        formatter={(value, name) => [
+                          `${value ?? 0} ${name === 'dien' ? 'kWh' : 'm³'}`,
+                          name === 'dien' ? 'Điện' : 'Nước',
+                        ]}
                       />
-                      <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                        {aiInsight.DuLieuBieuDo.map((_: number, idx: number) => (
-                          <Cell key={idx} fill={idx === aiInsight.DuLieuBieuDo.length - 1 ? '#F59E0B' : '#94A3B8'} />
-                        ))}
-                      </Bar>
+                      <Legend formatter={(value) => value === 'dien' ? 'Điện (kWh)' : 'Nước (m³)'} wrapperStyle={{ fontSize: 10, color: '#CBD5E1' }} />
+                      <Bar yAxisId="dien" dataKey="dien" name="dien" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                      <Bar yAxisId="nuoc" dataKey="nuoc" name="nuoc" fill="#38BDF8" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -472,12 +509,11 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
     </div>
   ) : (
     <div className="bg-white rounded-2xl p-5 border border-gray-100 h-40 flex flex-col items-center justify-center text-center">
-      <Sparkles size={24} className="text-gray-300 mb-2" />
-      <p className="text-sm text-gray-400 mb-3">Chưa có phân tích AI cho kỳ này</p>
-      <button onClick={handleGenerateAI} disabled={generatingAI || !hoaDon} className="px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-2">
-        {generatingAI ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-        {generatingAI ? 'Đang phân tích...' : 'Phân tích hóa đơn này'}
-      </button>
+      {generatingAI ? <Loader2 size={22} className="mb-2 animate-spin text-[#0068FF]" /> : <Sparkles size={22} className="mb-2 text-gray-300" />}
+      <p className="text-sm leading-relaxed text-gray-600">
+        {generatingAI ? 'Đang phân tích hóa đơn và dựng biểu đồ…' : aiError || (hoaDon ? 'Chưa thể tạo phân tích cho hóa đơn này.' : 'Chưa có hóa đơn để phân tích.')}
+      </p>
+      {aiInsight?.DuLieuBieuDo?.length > 0 && <p className="mt-1 text-xs text-gray-500">Biểu đồ điện và nước đang được cập nhật.</p>}
     </div>
   );
 
@@ -486,6 +522,7 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
     'Hóa đơn nào chưa thanh toán?',
     'Tóm tắt lịch sử tiêu thụ',
     'Kỳ gần nhất tiêu thụ bao nhiêu?',
+    'Giá một số điện hiện nay là bao nhiêu?',
   ];
 
   const hoiDapPanel = (
@@ -495,7 +532,10 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
           <div className="w-6 h-6 rounded-lg bg-[#0068FF]/10 flex items-center justify-center">
             <MessageCircle size={13} className="text-[#0068FF]" />
           </div>
-          <span className="text-xs font-semibold text-[#141415]">Hỏi AI về hóa đơn của bạn</span>
+          <div>
+            <span className="text-xs font-semibold text-[#141415]">Trợ lý điện nước</span>
+            <p className="text-[10px] text-gray-400">Hóa đơn, mức tiêu thụ và kiến thức chung</p>
+          </div>
         </div>
         {chatHistory.length > 0 && (
           <button
@@ -511,7 +551,8 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
         {chatHistory.length === 0 && (
           <div className="text-center py-3">
             <p className="text-[11px] text-gray-400 mb-2.5">
-              Hỏi về lịch sử điện nước, hóa đơn, thanh toán...
+              <span className="block text-xs font-medium text-gray-600">Bạn cần xem thông tin gì?</span>
+              <span className="mt-1 block text-[11px] text-gray-400">Hỏi về hóa đơn, mức dùng điện nước hoặc kiến thức chung.</span>
             </p>
             <div className="flex flex-wrap gap-1.5 justify-center">
               {QUICK_QUESTIONS.map((q) => (
@@ -535,8 +576,24 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
                 <Sparkles size={11} className="text-[#0068FF]" />
               </div>
             )}
-            <div className={`max-w-[82%] rounded-2xl px-3 py-2 text-[12px] leading-relaxed ${msg.role === 'user' ? 'bg-[#0068FF] text-white rounded-tr-sm' : 'bg-gray-50 text-gray-700 rounded-tl-sm border border-gray-100'}`}>
-              {msg.role === 'ai' ? <div className="space-y-0.5">{renderMarkdown(msg.text)}</div> : msg.text}
+            <div className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${msg.role === 'user' ? 'bg-[#0068FF] text-white rounded-tr-sm' : 'bg-gray-50 text-gray-700 rounded-tl-sm border border-gray-100'}`}>
+              {msg.role === 'ai' ? (
+                <div className="space-y-1.5">
+                  {renderMarkdown(msg.text)}
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="border-t border-gray-200 pt-2">
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Nguồn tham khảo</p>
+                      <div className="space-y-1">
+                        {msg.sources.map((source, index) => (
+                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer" className="block truncate text-[11px] font-medium text-[#0068FF] hover:underline">
+                            {source.title} ↗
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : msg.text}
             </div>
           </div>
         ))}
@@ -548,7 +605,7 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
             </div>
             <div className="bg-gray-50 rounded-2xl rounded-tl-sm px-3 py-2 border border-gray-100 flex items-center gap-1.5">
               <Loader2 size={12} className="animate-spin text-[#0068FF]" />
-              <span className="text-[11px] text-gray-400">Đang truy vấn dữ liệu...</span>
+              <span className="text-xs text-gray-500">Đang soạn câu trả lời…</span>
             </div>
           </div>
         )}
@@ -561,13 +618,14 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
             value={cauHoi}
             onChange={(e) => setCauHoi(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleHoiDap()}
-            placeholder="Nhập câu hỏi..."
+            placeholder="Nhập câu hỏi của bạn…"
             maxLength={500}
             className="flex-1 px-3.5 py-2 rounded-xl border border-gray-200 bg-gray-50/50 text-sm text-[#141415] focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-[#0068FF]"
           />
           <button
             onClick={() => handleHoiDap()}
             disabled={hoiDapLoading || !cauHoi.trim()}
+            aria-label="Gửi câu hỏi"
             className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all ${hoiDapLoading || !cauHoi.trim() ? 'bg-gray-100 text-gray-300' : 'bg-[#0068FF] text-white hover:bg-[#0055D4] shadow-sm shadow-blue-200'}`}
           >
             {hoiDapLoading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}

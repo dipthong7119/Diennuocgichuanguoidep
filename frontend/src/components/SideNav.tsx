@@ -1,4 +1,4 @@
-import { LayoutDashboard, ClipboardEdit, Receipt, Zap, Droplets, Eye } from 'lucide-react';
+import { LayoutDashboard, ClipboardEdit, Receipt, Zap, Droplets, Eye, FileText, Users } from 'lucide-react';
 import type { TabId } from '../types';
 
 interface SideNavProps {
@@ -14,6 +14,12 @@ export default function SideNav({ activeTab, onTabChange, userRole = 'admin' }: 
     { id: 'meter', label: isAdmin ? 'Nhập số' : 'Chỉ số', desc: isAdmin ? 'Cập nhật chỉ số' : 'Xem chỉ số', icon: isAdmin ? ClipboardEdit : Eye },
     { id: 'bill', label: 'Hóa đơn', desc: 'Chi tiết & thanh toán', icon: Receipt },
   ];
+  if (isAdmin) {
+    tabs.push(
+      { id: 'invoices', label: 'Danh sách hóa đơn', desc: 'Lọc theo phòng và trạng thái', icon: FileText },
+      { id: 'users', label: 'Danh sách người dùng', desc: 'Tài khoản và liên hệ', icon: Users },
+    );
+  }
   return (
     <aside className="w-64 min-h-screen bg-gradient-to-b from-[#003BBE] to-[#0068FF] flex flex-col shadow-xl">
       {/* Brand */}
