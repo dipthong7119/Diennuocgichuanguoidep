@@ -152,6 +152,99 @@ def seed():
             db.add_all(hoa_don_list)
             print(f"[+] Đã tạo {len(hoa_don_list)} hóa đơn")
 
+        # ── 6. Bổ sung dữ liệu mẫu đủ 12 kỳ của năm 2026 ────────────────────
+        # Chạy lại an toàn: chỉ thêm kỳ còn thiếu, giữ nguyên chỉ số/thanh toán hiện có.
+        dien_co_so = {1: 50, 2: 45, 3: 33, 4: 70, 5: 32}
+        nuoc_co_so = {1: 8, 2: 9, 3: 5, 4: 12, 5: 5}
+        added_readings = 0
+        added_invoices = 0
+
+        db.flush()
+        households = db.query(HoGiaDinh).order_by(HoGiaDinh.MaHo).all()
+        meters = db.query(DongHo).all()
+        meters_by_household: dict[str, list[DongHo]] = {}
+        for meter in meters:
+            meters_by_household.setdefault(meter.MaHo, []).append(meter)
+
+        for household in households:
+            try:
+                room_index = int(household.MaHo.split("-")[-1])
+            except ValueError:
+                continue
+
+            for month_number in range(1, 13):
+                period = date(2026, month_number, 1)
+                for meter in meters_by_household.get(household.MaHo, []):
+                    exists = db.query(ChiSoTieuThu.MaChiSo).filter(
+                        ChiSoTieuThu.MaDongHo == meter.MaDongHo,
+                        ChiSoTieuThu.ThangNam == period,
+                    ).first()
+                    if exists:
+                        continue
+
+                    previous_record = (
+                        db.query(ChiSoTieuThu)
+                        .filter(
+                            ChiSoTieuThu.MaDongHo == meter.MaDongHo,
+                            ChiSoTieuThu.ThangNam < period,
+                        )
+                        .order_by(ChiSoTieuThu.ThangNam.desc())
+                        .first()
+                    )
+                    previous = previous_record.ChiSoMoi if previous_record else (100 if meter.Loai == "Điện" else 10)
+
+                    if meter.Loai == "Điện":
+                        base = dien_co_so.get(room_index, 45)
+                        usage = base if month_number <= 3 else base + ((month_number * 7 + room_index * 3) % 15) - 7
+                        meter_suffix = "D"
+                    else:
+                        base = nuoc_co_so.get(room_index, 7)
+                        usage = base if month_number <= 3 else base + ((month_number + room_index) % 3) - 1
+                        meter_suffix = "N"
+
+                    usage = max(1, usage)
+                    db.add(ChiSoTieuThu(
+                        MaChiSo=f"CS-26-{room_index:03d}-{month_number:02d}-{meter_suffix}",
+                        MaDongHo=meter.MaDongHo,
+                        ThangNam=period,
+                        ChiSoCu=previous,
+                        ChiSoMoi=previous + usage,
+                    ))
+                    added_readings += 1
+
+                # Flush readings so the new period's invoice includes both utilities.
+                db.flush()
+                invoice_exists = db.query(HoaDon.MaHoaDon).filter(
+                    HoaDon.MaHo == household.MaHo,
+                    HoaDon.ThangNam == period,
+                ).first()
+                if invoice_exists:
+                    continue
+
+                period_readings = (
+                    db.query(ChiSoTieuThu, DongHo)
+                    .join(DongHo, ChiSoTieuThu.MaDongHo == DongHo.MaDongHo)
+                    .filter(DongHo.MaHo == household.MaHo, ChiSoTieuThu.ThangNam == period)
+                    .all()
+                )
+                if not period_readings:
+                    continue
+                amount = sum(
+                    (reading.ChiSoMoi - reading.ChiSoCu) * meter.DonGia
+                    for reading, meter in period_readings
+                )
+                paid = month_number <= 2 or month_number % 2 == 0
+                db.add(HoaDon(
+                    MaHoaDon=f"HD-2026-{room_index:03d}-{month_number:02d}",
+                    MaHo=household.MaHo,
+                    ThangNam=period,
+                    TongTien=amount,
+                    TrangThaiThanhToan=paid,
+                ))
+                added_invoices += 1
+
+        print(f"[+] Đã bổ sung {added_readings} chỉ số và {added_invoices} hóa đơn còn thiếu trong năm 2026")
+
         db.commit()
         print("\n[OK] Seed data hoàn tất!")
         print("=" * 50)

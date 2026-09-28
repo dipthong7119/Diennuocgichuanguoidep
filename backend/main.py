@@ -3,15 +3,19 @@ main.py — Entry point của ứng dụng FastAPI
 Hệ thống Quản lý Hóa đơn Điện nước Hộ gia đình có tích hợp AI
 """
 
+import asyncio
+from datetime import datetime, timedelta, timezone
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 import os
 
-from database import create_tables
+from database import create_tables, SessionLocal
 from routers import ho_gia_dinh, dong_ho, chi_so, ai_insight
 from routers import auth, thong_ke
+from services.nhac_no import send_overdue_reminders, sms_configuration
 
 # ── Khởi tạo App ──────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -28,6 +32,32 @@ app = FastAPI(
     },
 )
 
+_sms_scheduler_task: asyncio.Task | None = None
+VIETNAM_TZ = timezone(timedelta(hours=7), "Asia/Ho_Chi_Minh")
+
+
+def _send_scheduled_reminders():
+    db = SessionLocal()
+    try:
+        result = send_overdue_reminders(
+            db,
+            today=datetime.now(VIETNAM_TZ).date(),
+        )
+        if result["ready"] and (result["sent"] or result["failed"]):
+            print(f"[SMS] Đã gửi {result['sent']} tin, lỗi {result['failed']}.")
+    finally:
+        db.close()
+
+
+async def _schedule_overdue_reminders():
+    while True:
+        now = datetime.now(VIETNAM_TZ)
+        next_run = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run += timedelta(days=1)
+        await asyncio.sleep(max(1, (next_run - now).total_seconds()))
+        await asyncio.to_thread(_send_scheduled_reminders)
+
 # ── CORS — cho phép Frontend HTML/JS gọi API ─────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
@@ -39,9 +69,24 @@ app.add_middleware(
 
 # ── Tạo bảng CSDL khi khởi động ──────────────────────────────────────────────
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
+    global _sms_scheduler_task
     create_tables()
     print("[OK] Da khoi tao CSDL SQLite thanh cong.")
+    config = sms_configuration()
+    if config["enabled"] and not config["configured"]:
+        print("[SMS] SMS_ENABLED=true nhưng thiếu cấu hình Twilio; nhắc nợ đang tạm dừng.")
+    _sms_scheduler_task = asyncio.create_task(_schedule_overdue_reminders())
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    if _sms_scheduler_task:
+        _sms_scheduler_task.cancel()
+        try:
+            await _sms_scheduler_task
+        except asyncio.CancelledError:
+            pass
 
 # ── Mount Routers ─────────────────────────────────────────────────────────────
 app.include_router(auth.router)

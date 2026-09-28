@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import Optional
 
-from database import get_db, NguoiDung
+from database import get_db, NguoiDung, HoGiaDinh
 
 router = APIRouter(prefix="/auth", tags=["Xác Thực"])
 
@@ -69,6 +69,32 @@ def require_admin(request: Request) -> dict:
             detail="Chỉ admin mới có quyền thực hiện thao tác này"
         )
     return user
+
+
+@router.get("/users", summary="Danh sách tài khoản và thông tin người dùng (chỉ admin)")
+def get_users(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin),
+):
+    """Trả thông tin tài khoản và hộ liên kết, tuyệt đối không trả mật khẩu/hash."""
+    rows = (
+        db.query(NguoiDung, HoGiaDinh)
+        .outerjoin(HoGiaDinh, NguoiDung.MaHo == HoGiaDinh.MaHo)
+        .order_by(NguoiDung.Role, NguoiDung.Username)
+        .all()
+    )
+    return [
+        {
+            "username": user.Username,
+            "role": user.Role,
+            "ma_ho": user.MaHo,
+            "ten_nguoi_dung": household.TenChuHo if household else user.Username,
+            "ma_phong": household.MaPhong if household else None,
+            "so_dien_thoai": household.SoDienThoai if household else None,
+            "dia_chi": household.DiaChi if household else None,
+        }
+        for user, household in rows
+    ]
 
 
 @router.post("/login", response_model=LoginResponse, summary="Đăng nhập")

@@ -2,7 +2,7 @@
 schemas.py — Pydantic models cho request/response của toàn bộ API
 """
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import date
 
@@ -176,7 +176,7 @@ class AIInsightResponse(BaseModel):
     MaHoaDon: str
     NoiDungNhanXet: str
     MucDoCanhBao: str
-    DuLieuBieuDo: Optional[list[int]] = None  # Mảng tiêu thụ 3 kỳ gần nhất
+    DuLieuBieuDo: Optional[list[dict]] = None  # Điện/nước theo tháng, 3 kỳ gần nhất
 
     model_config = {"from_attributes": True}
 
@@ -204,6 +204,7 @@ class AIQueryResponse(BaseModel):
     cau_hoi: str
     tra_loi: str
     so_ky_du_lieu_dung: int
+    sources: list[dict[str, str]] = Field(default_factory=list)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

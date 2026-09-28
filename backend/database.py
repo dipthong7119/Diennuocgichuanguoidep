@@ -3,10 +3,12 @@ database.py — Cấu hình SQLAlchemy ORM và định nghĩa 5 bảng CSDL
 """
 
 from sqlalchemy import (
-    create_engine, Column, String, Float, Integer, Boolean, Text, Date, ForeignKey
+    create_engine, Column, String, Float, Integer, Boolean, Text, Date, DateTime,
+    ForeignKey, UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from typing import Generator
+from datetime import datetime
 
 # ── Engine & Session ──────────────────────────────────────────────────────────
 DATABASE_URL = "sqlite:///./database.db"
@@ -84,6 +86,20 @@ class NguoiDung(Base):
     Role          = Column(String, nullable=False, default="user")  # 'admin' | 'user'
     MaHo          = Column(String, ForeignKey("HoGiaDinh.MaHo"), nullable=True)
     # admin → MaHo = None; user thường → MaHo = mã phòng của họ
+
+
+class LogNhacNo(Base):
+    """Ghi nhận SMS nhắc nợ đã gửi, tối đa một lần/phòng/tháng."""
+    __tablename__ = "LogNhacNo"
+    __table_args__ = (
+        UniqueConstraint("MaHo", "KyNhac", name="uq_log_nhac_no_phong_ky"),
+    )
+
+    MaLog             = Column(String, primary_key=True)
+    MaHo              = Column(String, ForeignKey("HoGiaDinh.MaHo"), nullable=False, index=True)
+    KyNhac            = Column(String(7), nullable=False)
+    MaHoaDonCuNhat    = Column(String, nullable=False)
+    ThoiDiemGui       = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 # ── Dependency ────────────────────────────────────────────────────────────────

@@ -23,6 +23,19 @@ Chatbot hỏi-đáp hỗ trợ cả kiến thức chung (mẹo tiết kiệm, th
 - Xếp hạng tiêu thụ: GET /thong-ke/xep-hang?loai=Dien&thang=2026-03&sap_xep=giam_dan
 - Lọc hóa đơn: GET /thong-ke/hoa-don-loc?nam=2026&thang=3
 
+7. Danh sách quản trị
+- GET /auth/users: danh sách tài khoản kèm tên, phòng, số điện thoại và địa chỉ (chỉ admin).
+- Bộ lọc hóa đơn hỗ trợ thêm ma_ho và trang_thai=da_thu|chua_thu (chỉ admin).
+
+8. SMS nhắc nợ quá hạn
+- Hệ thống kiểm tra mỗi ngày lúc 09:00 theo giờ Việt Nam.
+- Gửi tối đa một SMS cho mỗi phòng trong một tháng nếu phòng còn hóa đơn chưa thanh toán từ 3 tháng trở lên.
+- Sao chép .env.example thành .env, đặt SMS_ENABLED=true và điền TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER.
+- Số điện thoại Việt Nam lưu dạng 0xxxxxxxxx sẽ được chuyển sang +84 khi gửi. Chỉ gửi được khi tài khoản Twilio và số gửi đã hoạt động.
+
+9. Dữ liệu mẫu năm 2026
+- Chạy python seed_data.py để bổ sung các kỳ còn thiếu đến đủ 12 tháng. Script giữ nguyên hóa đơn và chỉ số đã có.
+
 vào xem các API :http://localhost:8000/docs.
 vào xem UI :http://localhost:8000.
 khởi động server thì chạy: python -m uvicorn main:app --reload (trỏ vào thư mục rồi chạy).

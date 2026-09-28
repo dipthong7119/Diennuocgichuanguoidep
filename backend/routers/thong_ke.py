@@ -13,6 +13,7 @@ from typing import List
 
 from database import get_db, HoaDon, HoGiaDinh, DongHo, ChiSoTieuThu
 from routers.auth import require_login, require_admin
+from services.nhac_no import sms_configuration
 
 router = APIRouter(prefix="/thong-ke", tags=["Thống Kê"])
 
@@ -266,6 +267,8 @@ def xep_hang_tieu_thu(
 def loc_hoa_don(
     nam: int | None = None,
     thang: int | None = None,
+    ma_ho: str | None = None,
+    trang_thai: str | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),   # chỉ admin
 ):
@@ -278,6 +281,11 @@ def loc_hoa_don(
     """
     try:
         from sqlalchemy import extract
+        if thang is not None and not 1 <= thang <= 12:
+            raise HTTPException(status_code=400, detail="Tháng phải nằm trong khoảng 1–12")
+        if trang_thai not in (None, "da_thu", "chua_thu"):
+            raise HTTPException(status_code=400, detail="Trạng thái phải là da_thu hoặc chua_thu")
+
         query = db.query(HoaDon, HoGiaDinh).join(
             HoGiaDinh, HoaDon.MaHo == HoGiaDinh.MaHo
         )
@@ -286,6 +294,12 @@ def loc_hoa_don(
             query = query.filter(extract("year", HoaDon.ThangNam) == nam)
         if thang:
             query = query.filter(extract("month", HoaDon.ThangNam) == thang)
+        if ma_ho:
+            query = query.filter(HoaDon.MaHo == ma_ho)
+        if trang_thai == "da_thu":
+            query = query.filter(HoaDon.TrangThaiThanhToan.is_(True))
+        elif trang_thai == "chua_thu":
+            query = query.filter(HoaDon.TrangThaiThanhToan.is_(False))
 
         results = query.order_by(HoaDon.ThangNam.desc()).all()
 
@@ -301,6 +315,15 @@ def loc_hoa_don(
             }
             for hd, ho in results
         ]
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi lọc hóa đơn: {str(e)}")
+
+
+@router.get("/nhac-no/trang-thai", summary="Trạng thái cấu hình SMS nhắc nợ (chỉ admin)")
+def trang_thai_nhac_no(
+    current_user: dict = Depends(require_admin),
+):
+    return sms_configuration()
 

@@ -7,13 +7,17 @@ Phân quyền:
   - user  : chỉ phân tích/xem hóa đơn của phòng mình
 """
 
+import json
 import os
 import uuid
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from typing import List
 from dotenv import load_dotenv
+from urllib.parse import urlencode
+from urllib.request import Request as URLRequest, urlopen
 
 from database import get_db, HoaDon, ChiSoTieuThu, DongHo, PhanTichAI
 from schemas import AIInsightRequest, AIInsightResponse, AIQueryRequest, AIQueryResponse
@@ -26,31 +30,33 @@ router = APIRouter(prefix="/ai-insight", tags=["Phân Tích AI"])
 # ── Constants ─────────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
     "System: Bạn là trợ lý phân tích hóa đơn điện nước. "
-    "Chỉ nhận xét từ dữ liệu được cung cấp, không tự tạo số liệu. "
-    "Hãy trả lời NGẮN GỌN: tối đa 3-4 câu nhận xét chính và tối đa 3 gạch đầu dòng gợi ý tiết kiệm. "
-    "Không lặp lại số liệu thô dài dòng."
+    "Trả lời bằng tiếng Việt tự nhiên, rõ ràng và dễ đọc. Chỉ dùng dữ liệu được cung cấp, không tự tạo số liệu. "
+    "Không chào hỏi, không nhắc lại mảng số thô, không dùng thuật ngữ kỹ thuật nếu không cần. "
+    "Dùng đúng hai mục: '**Nhận xét**' với 1-2 câu ngắn nêu mức dùng và thay đổi đáng chú ý; "
+    "'**Gợi ý tiết kiệm**' với tối đa 3 gạch đầu dòng cụ thể. "
+    "So sánh riêng điện (kWh) và nước (m³), không cộng hai đơn vị. "
+    "Chỉ nêu phần trăm khi tính được từ dữ liệu; nếu thiếu kỳ so sánh, nói rõ chưa đủ dữ liệu."
 )
 
 USER_PROMPT_TEMPLATE = (
-    "User: Lịch sử tiêu thụ 3 tháng qua: {mang_lich_su_dien_nuoc}. "
-    "Hãy tóm tắt biến động và chỉ ra tháng cần kiểm tra rò rỉ nếu có, gợi ý cách tiết kiệm. "
-    "Trả lời ngắn gọn."
+    "User: Lịch sử tối đa 3 tháng, mỗi phần tử có tháng, điện (kWh) và nước (m³): "
+    "{mang_lich_su_dien_nuoc}. Không cộng hai đơn vị với nhau. "
+    "Hãy nêu kỳ mới nhất, xu hướng so với kỳ trước nếu có dữ liệu, và một vài gợi ý phù hợp. "
+    "Chỉ nhắc đến rò rỉ nước khi số liệu nước thực sự cho thấy mức tăng đáng chú ý."
 )
 
 # System prompt riêng cho tính năng Hỏi-đáp có truy vấn dữ liệu (retrieval theo hộ).
 # Ràng buộc: CHỈ được trả lời dựa trên dữ liệu truy vấn được cung cấp trong prompt,
 # không tự bịa số liệu, không suy đoán ngoài phạm vi dữ liệu.
 QUERY_SYSTEM_PROMPT = (
-    "System: Bạn là trợ lý thông minh về điện nước cho hộ gia đình. "
-    "Bạn có 2 chế độ trả lời:\n"
-    "1. Nếu câu hỏi LIÊN QUAN đến dữ liệu tiêu thụ/hóa đơn của hộ (có dữ liệu được cung cấp bên dưới): "
-    "Bắt buộc trả lời DỰA TRÊN DỮ LIỆU THẬT, không bịa số liệu. "
-    "Ghi rõ đây là 'dựa trên dữ liệu thực tế của bạn'.\n"
-    "2. Nếu câu hỏi KHÔNG liên quan đến dữ liệu hộ (ví dụ: mẹo tiết kiệm điện chung, "
-    "kiến thức phổ thông, gợi ý thiết bị...): Cho phép trả lời bằng kiến thức chung. "
-    "Ghi rõ đây là 'gợi ý/kiến thức chung, tham khảo thêm nguồn khác'. "
-    "KHÔNG được bịa số liệu của hộ khi trả lời câu hỏi chung.\n"
-    "Luôn phân biệt rõ trong câu trả lời đâu là dữ liệu thật và đâu là gợi ý chung."
+    "System: Bạn là trợ lý điện nước thân thiện, trả lời bằng tiếng Việt tự nhiên và súc tích. "
+    "Nếu câu hỏi về hóa đơn hoặc mức tiêu thụ, chỉ dùng dữ liệu hộ được cung cấp; nêu kỳ và đơn vị rõ ràng, "
+    "không đoán số. Có thể mở đầu tự nhiên bằng 'Theo hóa đơn...' khi cần phân biệt dữ liệu. "
+    "Nếu câu hỏi là kiến thức chung, hãy trả lời trực tiếp, không ép mọi câu trả lời vào một mẫu cố định. "
+    "Với thông tin có thể thay đổi theo thời gian như giá điện, hãy dùng Google Search và dẫn nguồn; "
+    "nếu không xác minh được, nói ngắn gọn rằng chưa có nguồn cập nhật. "
+    "Trình bày theo đoạn ngắn hoặc gạch đầu dòng khi hữu ích; tránh lời dẫn dài, lặp lại câu hỏi, "
+    "các nhãn máy móc như 'dữ liệu thật/kiến thức chung', và mọi số liệu không có căn cứ."
 )
 
 MUC_DO_CANH_BAO = {
@@ -62,7 +68,7 @@ MUC_DO_CANH_BAO = {
 
 # ── Helper: Xác định mức độ cảnh báo ─────────────────────────────────────────
 
-def _xac_dinh_muc_do(lich_su: List[int]) -> str:
+def _xac_dinh_muc_do(lich_su: List[int] | List[dict]) -> str:
     """
     Dựa vào % tăng của tháng gần nhất so với tháng trước để xác định mức cảnh báo.
     - Tăng < 20%: Bình thường
@@ -72,14 +78,27 @@ def _xac_dinh_muc_do(lich_su: List[int]) -> str:
     if len(lich_su) < 2:
         return MUC_DO_CANH_BAO["binh_thuong"]
 
-    # lich_su được sắp xếp từ cũ → mới; so sánh 2 tháng gần nhất
-    truoc = lich_su[-2]
-    hien_tai = lich_su[-1]
-
-    if truoc == 0:
-        return MUC_DO_CANH_BAO["nguy_hiem"] if hien_tai > 0 else MUC_DO_CANH_BAO["binh_thuong"]
-
-    phan_tram_tang = ((hien_tai - truoc) / truoc) * 100
+    # lich_su được sắp xếp từ cũ → mới. Nếu có dữ liệu từng loại,
+    # đánh giá riêng điện và nước để không cộng hai đơn vị khác nhau.
+    if isinstance(lich_su[-1], dict):
+        changes = []
+        for utility in ("dien", "nuoc"):
+            previous = lich_su[-2].get(utility, 0)
+            current = lich_su[-1].get(utility, 0)
+            if previous == 0:
+                if current > 0:
+                    changes.append(100.0)
+            else:
+                changes.append(((current - previous) / previous) * 100)
+        if not changes:
+            return MUC_DO_CANH_BAO["binh_thuong"]
+        phan_tram_tang = max(changes)
+    else:
+        truoc = lich_su[-2]
+        hien_tai = lich_su[-1]
+        if truoc == 0:
+            return MUC_DO_CANH_BAO["nguy_hiem"] if hien_tai > 0 else MUC_DO_CANH_BAO["binh_thuong"]
+        phan_tram_tang = ((hien_tai - truoc) / truoc) * 100
 
     if phan_tram_tang < 20:
         return MUC_DO_CANH_BAO["binh_thuong"]
@@ -91,7 +110,7 @@ def _xac_dinh_muc_do(lich_su: List[int]) -> str:
 
 # ── Helper: Gọi AI API ────────────────────────────────────────────────────────
 
-def _goi_ai_api(mang_lich_su: List[int]) -> str:
+def _goi_ai_api(mang_lich_su: List[int] | List[dict]) -> str:
     """
     Gửi mảng số liệu ẩn danh đến LLM và nhận kết quả phân tích.
     Hỗ trợ Gemini và OpenAI. Nếu không có key → trả mock response.
@@ -179,18 +198,116 @@ def _goi_ai_raw(system_prompt: str, user_prompt: str, fallback) -> str:
         return fallback()
 
 
-def _mock_response(mang_lich_su: List[int]) -> str:
+def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str, list[dict[str, str]]]:
+    """Trả lời hội thoại tự do; Gemini dùng Google Search cho câu hỏi cần dữ liệu mới."""
+    if os.getenv("AI_PROVIDER", "gemini").lower() != "gemini":
+        return _goi_ai_raw(system_prompt, user_prompt, fallback), []
+
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key or api_key == "your_gemini_api_key_here":
+        return fallback(), []
+
+    model_name = os.getenv("GEMINI_SEARCH_MODEL", "gemini-2.5-flash")
+    endpoint = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_name}:generateContent?{urlencode({'key': api_key})}"
+    )
+    payload = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"parts": [{"text": user_prompt}]}],
+        "tools": [{"google_search": {}}],
+        "generationConfig": {"temperature": 0.2},
+    }
+
+    try:
+        request = URLRequest(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        candidate = (result.get("candidates") or [{}])[0]
+        parts = candidate.get("content", {}).get("parts", [])
+        answer = "\n".join(part["text"] for part in parts if part.get("text"))
+        if not answer:
+            return fallback(), []
+
+        sources = []
+        seen_urls = set()
+        for chunk in candidate.get("groundingMetadata", {}).get("groundingChunks", []):
+            web_source = chunk.get("web") or {}
+            url = web_source.get("uri")
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                sources.append({
+                    "title": web_source.get("title") or "Nguồn tham khảo",
+                    "url": url,
+                })
+        return answer, sources[:5]
+    except Exception:
+        # Không báo một câu trả lời chưa được kiểm chứng là thông tin hiện hành.
+        return fallback(), []
+
+
+def _mock_response(mang_lich_su: List[int] | List[dict]) -> str:
     """Trả về phân tích mẫu khi không có AI API key."""
     if not mang_lich_su:
-        return "Chưa đủ dữ liệu để phân tích."
+        return "Chưa có đủ số liệu để phân tích hóa đơn này."
 
-    tb = sum(mang_lich_su) / len(mang_lich_su)
-    max_val = max(mang_lich_su)
+    if isinstance(mang_lich_su[0], dict):
+        lines = ["**Phân tích mẫu** *(Gemini chưa được cấu hình)*", "", "**Nhận xét**"]
+        for key, label, unit in (("dien", "Điện", "kWh"), ("nuoc", "Nước", "m³")):
+            records = [item for item in mang_lich_su if key in item]
+            if not records:
+                continue
+
+            latest = records[-1]
+            value = latest.get(key, 0)
+            period = latest.get("thang", "")
+            try:
+                year, month = period.split("-")
+                period_label = f"{int(month)}/{year}"
+            except (ValueError, AttributeError):
+                period_label = period or "gần nhất"
+
+            sentence = f"{label} kỳ {period_label}: {value} {unit}"
+            if len(records) > 1:
+                previous = records[-2].get(key, 0)
+                previous_period = records[-2].get("thang", "")
+                try:
+                    previous_year, previous_month = previous_period.split("-")
+                    previous_label = f"{int(previous_month)}/{previous_year}"
+                except (ValueError, AttributeError):
+                    previous_label = "trước"
+
+                if previous == 0:
+                    if value > 0:
+                        sentence += f", bắt đầu tăng so với kỳ {previous_label}"
+                else:
+                    change = round((value - previous) / previous * 100)
+                    if change > 0:
+                        sentence += f", tăng {change}% so với kỳ {previous_label}"
+                    elif change < 0:
+                        sentence += f", giảm {abs(change)}% so với kỳ {previous_label}"
+                    else:
+                        sentence += f", giữ nguyên so với kỳ {previous_label}"
+            lines.append(f"• {sentence}.")
+
+        lines.extend([
+            "",
+            "**Gợi ý tiết kiệm**",
+            "• Theo dõi chỉ số điện và nước mỗi kỳ để nhận ra thay đổi sớm.",
+            "• Tắt thiết bị khi không sử dụng; kiểm tra vòi nước nếu mức dùng tăng bất thường.",
+        ])
+        return "\n".join(lines)
+
     return (
-        f"[Mock - Chưa cấu hình AI API Key]\n"
-        f"Dữ liệu tiêu thụ 3 tháng: {mang_lich_su}.\n"
-        f"Trung bình: {tb:.1f} đơn vị/tháng. Mức cao nhất: {max_val} đơn vị.\n"
-        f"Khuyến nghị: Kiểm tra thiết bị sử dụng nhiều điện/nước nhất để tiết kiệm chi phí."
+        "**Phân tích mẫu** *(Gemini chưa được cấu hình)*\n\n"
+        "Chưa có đủ thông tin từng loại đồng hồ để tách riêng xu hướng điện và nước. "
+        "Hãy xem biểu đồ tiêu thụ để đối chiếu các kỳ gần đây."
     )
 
 
@@ -235,84 +352,166 @@ def _truy_van_du_lieu_ho(db: Session, ma_ho: str, so_ky: int = 12) -> List[dict]
     return ket_qua
 
 
+def _du_lieu_bieu_do(db: Session, ma_ho: str, den_ky: date) -> List[dict]:
+    """Gom tối đa 3 kỳ gần nhất thành hai chuỗi điện/nước cùng trục thời gian."""
+    records = (
+        db.query(ChiSoTieuThu, DongHo.Loai)
+        .join(DongHo, ChiSoTieuThu.MaDongHo == DongHo.MaDongHo)
+        .filter(DongHo.MaHo == ma_ho, ChiSoTieuThu.ThangNam <= den_ky)
+        .order_by(ChiSoTieuThu.ThangNam.asc())
+        .all()
+    )
+    by_month: dict[date, dict] = {}
+    for reading, utility_type in records:
+        month = reading.ThangNam.replace(day=1)
+        item = by_month.setdefault(month, {
+            "thang": month.strftime("%Y-%m"), "dien": 0, "nuoc": 0,
+        })
+        key = "dien" if utility_type == "Điện" else "nuoc"
+        item[key] += reading.ChiSoMoi - reading.ChiSoCu
+    return [by_month[month] for month in sorted(by_month)[-3:]]
+
+
+def _tao_hoac_cap_nhat_phan_tich(db: Session, hoa_don: HoaDon) -> AIInsightResponse:
+    chart_data = _du_lieu_bieu_do(db, hoa_don.MaHo, hoa_don.ThangNam)
+    noi_dung = _goi_ai_api(chart_data)
+    muc_do = _xac_dinh_muc_do(chart_data)
+
+    phan_tich = (
+        db.query(PhanTichAI)
+        .filter(PhanTichAI.MaHoaDon == hoa_don.MaHoaDon)
+        .order_by(PhanTichAI.MaDanhGia.desc())
+        .first()
+    )
+    if phan_tich:
+        phan_tich.NoiDungNhanXet = noi_dung
+        phan_tich.MucDoCanhBao = muc_do
+    else:
+        phan_tich = PhanTichAI(
+            MaDanhGia=f"AI-{uuid.uuid4().hex[:8].upper()}",
+            MaHoaDon=hoa_don.MaHoaDon,
+            NoiDungNhanXet=noi_dung,
+            MucDoCanhBao=muc_do,
+        )
+        db.add(phan_tich)
+
+    db.commit()
+    db.refresh(phan_tich)
+    return AIInsightResponse(
+        MaDanhGia=phan_tich.MaDanhGia,
+        MaHoaDon=phan_tich.MaHoaDon,
+        NoiDungNhanXet=phan_tich.NoiDungNhanXet,
+        MucDoCanhBao=phan_tich.MucDoCanhBao,
+        DuLieuBieuDo=chart_data,
+    )
+
+
+def _dinh_dang_ky_chat(ky: str) -> str:
+    """Đổi YYYY-MM thành MM/YYYY để câu trả lời dễ đọc hơn."""
+    try:
+        year, month = ky[:7].split("-")
+        return f"{int(month):02d}/{year}"
+    except (ValueError, AttributeError):
+        return ky
+
+
+def _dinh_dang_tien_chat(amount: float | int) -> str:
+    return f"{int(amount):,}".replace(",", ".") + " đ"
+
+
 def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
     """
     Phân tích thông minh từ dữ liệu thật khi chưa cấu hình AI API Key.
     Tự động trả lời các câu hỏi phổ biến dựa trên dữ liệu truy vấn được.
     """
+    q = cau_hoi.lower()
+    asks_electric_price = any(term in q for term in ("giá", "gia", "bao nhiêu", "bao nhieu")) and any(
+        term in q for term in ("điện", "dien", "kwh", "số điện", "so dien")
+    )
+    if asks_electric_price:
+        return (
+            "Biểu giá điện sinh hoạt được chia theo bậc tiêu thụ nên không có một mức chung cho mọi kWh. "
+            "Nhà cho thuê có thể áp dụng cách tính riêng. Hiện Gemini chưa được cấu hình nên tôi chưa thể "
+            "xác minh mức giá mới nhất; bạn có thể xem nguồn EVN bên dưới."
+        )
+
     if not du_lieu:
-        return "Chưa có dữ liệu lịch sử của hộ này để phân tích."
+        if any(k in q for k in ["mẹo", "meo", "tiết kiệm", "tiet kiem", "cách", "cach", "thiết bị", "thiet bi"]):
+            return (
+                "**Gợi ý tiết kiệm**\n"
+                "• Tắt thiết bị khi không sử dụng và ưu tiên đèn LED.\n"
+                "• Vệ sinh điều hòa định kỳ để thiết bị hoạt động hiệu quả.\n"
+                "• Kiểm tra vòi nước và bồn cầu nếu nghi có rò rỉ."
+            )
+        return "Chưa có lịch sử hóa đơn để trả lời câu hỏi về mức tiêu thụ của phòng."
 
     # Tách riêng dữ liệu điện và nước
     dien_data = [r for r in du_lieu if r.get("loai") == "Điện"]
     nuoc_data = [r for r in du_lieu if r.get("loai") == "Nước"]
 
-    q = cau_hoi.lower()
-
     # ── Câu hỏi về tháng dùng nhiều nhất ─────────────────────────────────────
     if any(k in q for k in ["nhiều nhất", "nhiêu nhất", "cao nhất", "nhiều nhat", "cao nhat"]):
-        lines = []
+        lines = ["**Mức tiêu thụ cao nhất**"]
         if any(k in q for k in ["điện", "dien"]) or not any(k in q for k in ["nước", "nuoc"]):
             if dien_data:
                 max_dien = max(dien_data, key=lambda r: r["tieu_thu"])
-                lines.append(f"⚡ **Điện**: Tháng {max_dien['thang'][:7]} tiêu thụ nhiều nhất với **{max_dien['tieu_thu']} kWh**.")
+                lines.append(f"• Điện: {max_dien['tieu_thu']} kWh trong kỳ {_dinh_dang_ky_chat(max_dien['thang'])}.")
         if any(k in q for k in ["nước", "nuoc"]) or not any(k in q for k in ["điện", "dien"]):
             if nuoc_data:
                 max_nuoc = max(nuoc_data, key=lambda r: r["tieu_thu"])
-                lines.append(f"💧 **Nước**: Tháng {max_nuoc['thang'][:7]} tiêu thụ nhiều nhất với **{max_nuoc['tieu_thu']} m³**.")
-        if not lines:
-            lines.append("Chưa đủ dữ liệu để xác định tháng tiêu thụ nhiều nhất.")
+                lines.append(f"• Nước: {max_nuoc['tieu_thu']} m³ trong kỳ {_dinh_dang_ky_chat(max_nuoc['thang'])}.")
+        if len(lines) == 1:
+            lines.append("Chưa đủ dữ liệu để xác định kỳ tiêu thụ cao nhất.")
         return "\n".join(lines)
 
     # ── Câu hỏi về thanh toán ─────────────────────────────────────────────────
     if any(k in q for k in ["thanh toán", "thanh toan", "đã trả", "da tra", "chua tra", "chưa trả"]):
-        lines = []
+        lines = ["**Tình trạng thanh toán**"]
         thang_list = sorted(set(r["thang"] for r in du_lieu))
         for thang in thang_list:
             rec = next((r for r in du_lieu if r["thang"] == thang), None)
             if rec and rec.get("da_thanh_toan") is not None:
-                trang_thai = "✅ Đã thanh toán" if rec["da_thanh_toan"] else "❌ Chưa thanh toán"
-                tien = f" — {int(rec['tong_tien_hoa_don_thang']):,} đ" if rec.get("tong_tien_hoa_don_thang") else ""
-                lines.append(f"📅 Tháng {thang[:7]}: {trang_thai}{tien}")
-        return "\n".join(lines) if lines else "Chưa có thông tin thanh toán."
+                trang_thai = "Đã thanh toán" if rec["da_thanh_toan"] else "Chưa thanh toán"
+                tien = f" · {_dinh_dang_tien_chat(rec['tong_tien_hoa_don_thang'])}" if rec.get("tong_tien_hoa_don_thang") else ""
+                lines.append(f"• Kỳ {_dinh_dang_ky_chat(thang)}: {trang_thai}{tien}.")
+        return "\n".join(lines) if len(lines) > 1 else "Chưa có thông tin thanh toán cho các kỳ này."
 
     # ── Câu hỏi về hóa đơn / tổng tiền ──────────────────────────────────────
     if any(k in q for k in ["hóa đơn", "hoa don", "tiền", "tien", "bao nhiêu", "bao nhieu"]):
-        lines = ["📋 **Lịch sử hóa đơn:**"]
+        lines = ["**Các hóa đơn gần đây**"]
         thang_list = sorted(set(r["thang"] for r in du_lieu))
         for thang in thang_list:
             rec = next((r for r in du_lieu if r["thang"] == thang), None)
-            if rec and rec.get("tong_tien_hoa_don_thang"):
-                trang_thai = "✅" if rec.get("da_thanh_toan") else "❌"
-                lines.append(f"  • Tháng {thang[:7]}: {int(rec['tong_tien_hoa_don_thang']):,} đ {trang_thai}")
+            if rec and rec.get("tong_tien_hoa_don_thang") is not None:
+                trang_thai = "đã thu" if rec.get("da_thanh_toan") else "chưa thu"
+                lines.append(f"• Kỳ {_dinh_dang_ky_chat(thang)}: {_dinh_dang_tien_chat(rec['tong_tien_hoa_don_thang'])} · {trang_thai}.")
         return "\n".join(lines)
 
     # ── Câu hỏi về lịch sử / xu hướng ───────────────────────────────────────
     if any(k in q for k in ["lịch sử", "lich su", "xu hướng", "xu huong", "thống kê", "thong ke", "tóm tắt", "tom tat"]):
-        lines = ["📊 **Tóm tắt tiêu thụ:**"]
+        lines = ["**Tóm tắt tiêu thụ**"]
         if dien_data:
             tong_dien = sum(r["tieu_thu"] for r in dien_data)
             tb_dien = tong_dien / len(dien_data)
-            lines.append(f"⚡ Điện: Trung bình **{tb_dien:.0f} kWh/tháng** (tổng {tong_dien} kWh / {len(dien_data)} tháng)")
+            lines.append(f"• Điện: trung bình {tb_dien:.0f} kWh/tháng trong {len(dien_data)} kỳ.")
         if nuoc_data:
             tong_nuoc = sum(r["tieu_thu"] for r in nuoc_data)
             tb_nuoc = tong_nuoc / len(nuoc_data)
-            lines.append(f"💧 Nước: Trung bình **{tb_nuoc:.1f} m³/tháng** (tổng {tong_nuoc} m³ / {len(nuoc_data)} tháng)")
+            lines.append(f"• Nước: trung bình {tb_nuoc:.1f} m³/tháng trong {len(nuoc_data)} kỳ.")
         return "\n".join(lines)
 
     # ── Câu hỏi tháng gần nhất / tháng này ──────────────────────────────────
     if any(k in q for k in ["tháng này", "thang nay", "gần nhất", "gan nhat", "mới nhất", "moi nhat", "vừa rồi"]):
-        lines = ["📅 **Kỳ gần nhất:**"]
+        lines = ["**Kỳ gần nhất**"]
         thang_max = max(r["thang"] for r in du_lieu)
         recs = [r for r in du_lieu if r["thang"] == thang_max]
-        lines.append(f"Tháng: **{thang_max[:7]}**")
+        lines.append(f"Kỳ {_dinh_dang_ky_chat(thang_max)}:")
         for r in recs:
-            icon = "⚡" if r["loai"] == "Điện" else "💧"
             don_vi = "kWh" if r["loai"] == "Điện" else "m³"
-            lines.append(f"{icon} {r['loai']}: **{r['tieu_thu']} {don_vi}**")
+            lines.append(f"• {r['loai']}: {r['tieu_thu']} {don_vi}.")
         if recs and recs[0].get("tong_tien_hoa_don_thang"):
-            trang_thai = "✅ Đã thanh toán" if recs[0].get("da_thanh_toan") else "❌ Chưa thanh toán"
-            lines.append(f"💰 Tổng hóa đơn: **{int(recs[0]['tong_tien_hoa_don_thang']):,} đ** — {trang_thai}")
+            trang_thai = "đã thu" if recs[0].get("da_thanh_toan") else "chưa thu"
+            lines.append(f"Tổng hóa đơn: {_dinh_dang_tien_chat(recs[0]['tong_tien_hoa_don_thang'])} · {trang_thai}.")
         return "\n".join(lines)
 
     # ── Câu hỏi kiến thức chung (mẹo tiết kiệm, thiết bị, ...) ──────────
@@ -323,39 +522,31 @@ def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
         "công suất", "cong suat", "giá điện", "gia dien", "giá nước", "gia nuoc",
     ]
     if any(k in q for k in general_keywords):
-        lines = [
-            "💡 **Gợi ý / Kiến thức chung** *(tham khảo thêm nguồn khác)*:\n",
-        ]
+        lines = ["**Một vài gợi ý**"]
         if any(k in q for k in ["tiết kiệm", "tiet kiem", "mẹo", "meo"]):
             lines.extend([
-                "• Tắt thiết bị khi không sử dụng, rút phích cắm để tránh điện chờ.",
-                "• Sử dụng đèn LED thay bóng sợi đốt, tiết kiệm đến 80% điện chiếu sáng.",
-                "• Đặt điều hòa 26-28°C, vệ sinh lọc gió định kỳ.",
-                "• Kiểm tra vòi nước, bồn cầu tránh rò rỉ ngầm.",
-                "• Sử dụng máy giặt/rửa bát đầy tải để tối ưu nước và điện.",
+                "• Tắt thiết bị khi không sử dụng và ưu tiên đèn LED.",
+                "• Vệ sinh điều hòa định kỳ; đặt nhiệt độ phù hợp với nhu cầu.",
+                "• Kiểm tra vòi nước, bồn cầu để phát hiện rò rỉ sớm.",
             ])
         else:
             lines.extend([
-                "• Điều hòa là thiết bị tiêu thụ điện nhiều nhất (1-3 kWh/giờ).",
-                "• Bình nóng lạnh nên đặt hẹn giờ thay vì bật cả ngày.",
-                "• 1 m³ nước ≈ 1000 lít — một vòi rò rỉ có thể lãng phí 15 m³/tháng.",
+                "• Kiểm tra công suất trên nhãn thiết bị và thời gian sử dụng để ước tính điện năng.",
+                "• Bình nóng lạnh nên tắt khi không cần dùng.",
+                "• Nếu chỉ số nước tăng bất thường, kiểm tra vòi và bồn cầu trước.",
             ])
         return "\n".join(lines)
 
     # ── Câu trả lời mặc định (không khớp câu hỏi nào) ───────────────────────
     thang_list = sorted(set(r["thang"] for r in du_lieu))
     lines = [
-        f"📋 Tôi có dữ liệu {len(thang_list)} tháng của hộ này ({thang_list[0][:7]} → {thang_list[-1][:7]}).",
+        f"Tôi có dữ liệu {len(thang_list)} kỳ, từ {_dinh_dang_ky_chat(thang_list[0])} đến {_dinh_dang_ky_chat(thang_list[-1])}.",
         "",
-        "Bạn có thể hỏi tôi:",
-        "  • Tháng nào dùng điện/nước nhiều nhất?",
-        "  • Hóa đơn tháng [X] là bao nhiêu?",
-        "  • Tháng nào chưa thanh toán?",
-        "  • Tóm tắt lịch sử tiêu thụ",
-        "  • Mẹo tiết kiệm điện nước",
-        "",
-        "💡 *Để có phân tích AI nâng cao bằng ngôn ngữ tự nhiên, hãy cấu hình*",
-        "   *`GEMINI_API_KEY` trong file `.env` (miễn phí tại aistudio.google.com)*",
+        "Bạn có thể hỏi, chẳng hạn:",
+        "• Kỳ nào dùng điện hoặc nước nhiều nhất?",
+        "• Hóa đơn nào còn chưa thanh toán?",
+        "• Tóm tắt mức tiêu thụ gần đây.",
+        "• Cho tôi vài mẹo tiết kiệm điện nước.",
     ]
     return "\n".join(lines)
 
@@ -400,56 +591,8 @@ def generate_ai_insight(
                     detail="Bạn không có quyền phân tích hóa đơn của phòng này"
                 )
 
-        # 3. Lấy đồng hồ thuộc hộ gia đình này
-        dong_hos = db.query(DongHo).filter(DongHo.MaHo == payload.ma_ho).all()
-        if not dong_hos:
-            raise HTTPException(status_code=404,
-                                detail=f"Hộ '{payload.ma_ho}' chưa có đồng hồ nào")
-
-        ma_dong_ho_list = [dh.MaDongHo for dh in dong_hos]
-
-        # 4. Lấy 3 tháng gần nhất — CHỈ LẤY SỐ LIỆU, ẨN DANH HÓA
-        lich_su_records = (
-            db.query(ChiSoTieuThu)
-            .filter(ChiSoTieuThu.MaDongHo.in_(ma_dong_ho_list))
-            .order_by(desc(ChiSoTieuThu.ThangNam))
-            .limit(3)
-            .all()
-        )
-
-        # 5. Chuẩn bị mảng số (ẩn danh — không chứa tên/SĐT/MaPhong)
-        # Đảo ngược để thứ tự từ cũ → mới
-        mang_tieu_thu: List[int] = [
-            r.ChiSoMoi - r.ChiSoCu for r in reversed(lich_su_records)
-        ]
-
-        # 6. Gọi AI API (ẩn danh)
-        noi_dung = _goi_ai_api(mang_tieu_thu)
-
-        # 7. Xác định mức độ cảnh báo
-        muc_do = _xac_dinh_muc_do(mang_tieu_thu)
-
-        # 8. Lưu vào PhanTichAI
-        ma_danh_gia = f"AI-{uuid.uuid4().hex[:8].upper()}"
-        phan_tich = PhanTichAI(
-            MaDanhGia=ma_danh_gia,
-            MaHoaDon=payload.ma_hoa_don,
-            NoiDungNhanXet=noi_dung,
-            MucDoCanhBao=muc_do,
-        )
-        db.add(phan_tich)
-        db.commit()
-        db.refresh(phan_tich)
-
-        # 9. Trả về kèm DuLieuBieuDo (không lưu vào DB, chỉ trả kèm response)
-        from schemas import AIInsightResponse
-        return AIInsightResponse(
-            MaDanhGia=phan_tich.MaDanhGia,
-            MaHoaDon=phan_tich.MaHoaDon,
-            NoiDungNhanXet=phan_tich.NoiDungNhanXet,
-            MucDoCanhBao=phan_tich.MucDoCanhBao,
-            DuLieuBieuDo=mang_tieu_thu,
-        )
+        # Phân tích theo kỳ của hóa đơn, gom riêng điện/nước và chỉ gửi số liệu ẩn danh.
+        return _tao_hoac_cap_nhat_phan_tich(db, hoa_don)
 
     except HTTPException:
         raise
@@ -486,10 +629,22 @@ def get_ai_insights(
                     detail="Bạn không có quyền xem phân tích của hóa đơn này"
                 )
 
+        hoa_don = db.query(HoaDon).filter(HoaDon.MaHoaDon == ma_hoa_don).first()
         results = db.query(PhanTichAI).filter(
             PhanTichAI.MaHoaDon == ma_hoa_don
         ).all()
-        return results
+        if not hoa_don:
+            return results
+        return [
+            AIInsightResponse(
+                MaDanhGia=result.MaDanhGia,
+                MaHoaDon=result.MaHoaDon,
+                NoiDungNhanXet=result.NoiDungNhanXet,
+                MucDoCanhBao=result.MucDoCanhBao,
+                DuLieuBieuDo=_du_lieu_bieu_do(db, hoa_don.MaHo, hoa_don.ThangNam),
+            )
+            for result in results
+        ]
     except HTTPException:
         raise
     except Exception as e:
@@ -531,30 +686,34 @@ def hoi_dap_ai(
 
         # 2. Truy vấn hộ tồn tại
         du_lieu = _truy_van_du_lieu_ho(db, payload.ma_ho, so_ky=12)
-        if not du_lieu:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Hộ '{payload.ma_ho}' chưa có dữ liệu chỉ số/hóa đơn nào để truy vấn"
-            )
-
         # 3. Ghép prompt: dữ liệu truy vấn được (retrieval) + câu hỏi người dùng
         user_prompt = (
-            f"User: Dữ liệu lịch sử tiêu thụ/hóa đơn của hộ (từ cũ đến mới, "
-            f"đã ẩn danh): {du_lieu}\n"
+            f"Dữ liệu lịch sử tiêu thụ/hóa đơn của hộ (từ cũ đến mới, đã ẩn danh): "
+            f"{du_lieu if du_lieu else 'Chưa có dữ liệu lịch sử.'}\n"
             f"Câu hỏi: {payload.cau_hoi}"
         )
 
-        # 4. Gọi AI (fallback sang mock nếu chưa cấu hình API key)
-        tra_loi = _goi_ai_raw(
+        # 4. Hỏi AI tự do; Gemini có thể tra cứu Google Search cho thông tin mới.
+        tra_loi, sources = _goi_ai_hoi_dap(
             QUERY_SYSTEM_PROMPT,
             user_prompt,
             fallback=lambda: _mock_query_response(du_lieu, payload.cau_hoi),
         )
+        question = payload.cau_hoi.lower()
+        asks_electric_price = any(term in question for term in ("giá", "gia", "bao nhiêu", "bao nhieu")) and any(
+            term in question for term in ("điện", "dien", "kwh", "số điện", "so dien")
+        )
+        if asks_electric_price and not sources:
+            sources = [{
+                "title": "Biểu giá bán lẻ điện – EVN",
+                "url": "https://evn.com.vn/d/vi-VN/news/Bieu-gia-ban-le-dien-theo-Quyet-dinh-so-1279QD-BCTngay-0952025-cua-Bo-Cong-Thuong-60-28-502668",
+            }]
 
         return AIQueryResponse(
             cau_hoi=payload.cau_hoi,
             tra_loi=tra_loi,
             so_ky_du_lieu_dung=len(du_lieu),
+            sources=sources,
         )
 
     except HTTPException:
