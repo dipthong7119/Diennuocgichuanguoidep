@@ -1,7 +1,7 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
   Zap, Droplets, CheckCircle, XCircle, Sparkles, Lightbulb,
-  Printer, CreditCard, ChevronDown, ChevronUp, Shield, Loader2, MessageCircle, Send, TrendingUp
+  Printer, CreditCard, ChevronDown, ChevronUp, Shield, Loader2, MessageCircle, Send, TrendingUp, Trash2
 } from 'lucide-react';
 import { BarChart, Bar, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
@@ -26,9 +26,9 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
 
   type ChatMsg = { role: 'user' | 'ai'; text: string; sources?: { title: string; url: string }[] };
   const [chatHistory, setChatHistory] = useState<ChatMsg[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const [cauHoi, setCauHoi] = useState('');
   const [hoiDapLoading, setHoiDapLoading] = useState(false);
-  const [hoiDapError, setHoiDapError] = useState('');
 
   const [payLoading, setPayLoading] = useState(false);
   const [paySuccess, setPaySuccess] = useState(false);
@@ -43,6 +43,11 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
   const [generatingAI, setGeneratingAI] = useState(false);
   const [aiError, setAiError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const chat = chatScrollRef.current;
+    if (chat) chat.scrollTo({ top: chat.scrollHeight, behavior: 'smooth' });
+  }, [chatHistory, hoiDapLoading]);
 
   // Lấy danh sách hóa đơn và chỉ số từ backend
   useEffect(() => {
@@ -177,7 +182,6 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
     setChatHistory(prev => [...prev, { role: 'user', text: q }]);
     setCauHoi('');
     setHoiDapLoading(true);
-    setHoiDapError('');
 
     const token = localStorage.getItem('token');
     fetch('/ai-insight/hoi-dap', {
@@ -201,7 +205,6 @@ export default function BillTab({ desktop = false, userMaHo = null, userRole = '
       .catch((err) => {
         const errMsg = err.message || 'Không thể kết nối tới máy chủ.';
         setChatHistory(prev => [...prev, { role: 'ai', text: '❌ ' + errMsg }]);
-        setHoiDapError(errMsg);
       })
       .finally(() => setHoiDapLoading(false));
   }
@@ -457,7 +460,7 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
                 </span>
               </div>
               <div className="text-[13px] text-gray-100 leading-relaxed [&_strong]:text-white">
-                {renderMarkdown(aiInsight.NoiDungNhanXet)}
+                {renderMarkdown(String(aiInsight.NoiDungNhanXet || '').replace(/^\s*\[Mock\b[^\]]*\]\s*/i, ''))}
               </div>
             </div>
             {aiInsight.GoiYTietKiem && (
@@ -518,74 +521,79 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
   );
 
   const QUICK_QUESTIONS = [
-    'Tháng nào dùng điện nhiều nhất?',
+    'Tóm tắt hóa đơn gần nhất',
+    'Kỳ nào dùng điện nhiều nhất?',
     'Hóa đơn nào chưa thanh toán?',
-    'Tóm tắt lịch sử tiêu thụ',
-    'Kỳ gần nhất tiêu thụ bao nhiêu?',
-    'Giá một số điện hiện nay là bao nhiêu?',
+    'Vì sao bầu trời có màu xanh?',
   ];
 
   const hoiDapPanel = (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-50 overflow-hidden">
-      <div className="px-4 pt-3.5 pb-2.5 border-b border-gray-50 flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
-          <div className="w-6 h-6 rounded-lg bg-[#0068FF]/10 flex items-center justify-center">
-            <MessageCircle size={13} className="text-[#0068FF]" />
+    <section aria-label="Chat với trợ lý AI" className="flex h-[420px] max-h-[70vh] min-h-[320px] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <header className="flex flex-none items-center justify-between gap-3 border-b border-gray-100 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#0068FF]">
+            <MessageCircle size={18} />
           </div>
-          <div>
-            <span className="text-xs font-semibold text-[#141415]">Trợ lý điện nước</span>
-            <p className="text-[10px] text-gray-400">Hóa đơn, mức tiêu thụ và kiến thức chung</p>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-[#141415]">Trợ lý AI</h3>
+            <p className="text-xs text-gray-500">Hỏi về hóa đơn hoặc bất kỳ chủ đề nào</p>
           </div>
         </div>
         {chatHistory.length > 0 && (
           <button
-            onClick={() => { setChatHistory([]); setHoiDapError(''); }}
-            className="text-[10px] text-gray-400 hover:text-red-400 transition-colors"
+            type="button"
+            onClick={() => setChatHistory([])}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-200"
+            aria-label="Xóa lịch sử trò chuyện"
           >
-            Xóa lịch sử
+            <Trash2 size={14} />
+            <span className="hidden sm:inline">Xóa lịch sử</span>
           </button>
         )}
-      </div>
+      </header>
 
-      <div className="px-3 py-3 space-y-3 max-h-72 overflow-y-auto">
-        {chatHistory.length === 0 && (
-          <div className="text-center py-3">
-            <p className="text-[11px] text-gray-400 mb-2.5">
-              <span className="block text-xs font-medium text-gray-600">Bạn cần xem thông tin gì?</span>
-              <span className="mt-1 block text-[11px] text-gray-400">Hỏi về hóa đơn, mức dùng điện nước hoặc kiến thức chung.</span>
-            </p>
-            <div className="flex flex-wrap gap-1.5 justify-center">
+      <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 scroll-smooth">
+        {chatHistory.length === 0 ? (
+          <div className="mx-auto flex h-full max-w-3xl flex-col items-center justify-center text-center">
+            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-50 text-[#0068FF]">
+              <Sparkles size={20} />
+            </div>
+            <p className="text-sm font-semibold text-[#141415]">Bạn muốn hỏi điều gì?</p>
+            <p className="mt-1 text-xs text-gray-500">Chọn gợi ý hoặc nhập câu hỏi của bạn bên dưới.</p>
+            <div className="mt-4 grid w-full gap-2 sm:grid-cols-2">
               {QUICK_QUESTIONS.map((q) => (
                 <button
                   key={q}
+                  type="button"
                   onClick={() => handleHoiDap(q)}
                   disabled={hoiDapLoading}
-                  className="text-[11px] px-2.5 py-1 rounded-full bg-blue-50 text-[#0068FF] hover:bg-blue-100 transition-colors border border-blue-100"
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-left text-xs font-medium text-gray-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-[#0068FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 disabled:cursor-wait disabled:opacity-60"
                 >
                   {q}
                 </button>
               ))}
             </div>
           </div>
-        )}
+        ) : (
+          <div className="mx-auto w-full max-w-4xl space-y-4">
 
         {chatHistory.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={i} className={`flex items-end gap-2.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             {msg.role === 'ai' && (
-              <div className="w-6 h-6 rounded-full bg-[#0068FF]/10 flex items-center justify-center shrink-0 mr-2 mt-0.5">
-                <Sparkles size={11} className="text-[#0068FF]" />
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#0068FF]">
+                <Sparkles size={15} />
               </div>
             )}
-            <div className={`max-w-[88%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${msg.role === 'user' ? 'bg-[#0068FF] text-white rounded-tr-sm' : 'bg-gray-50 text-gray-700 rounded-tl-sm border border-gray-100'}`}>
+            <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed sm:max-w-[78%] ${msg.role === 'user' ? 'rounded-br-md bg-[#0068FF] text-white shadow-sm shadow-blue-100' : 'rounded-bl-md border border-gray-100 bg-gray-50 text-gray-700'}`}>
               {msg.role === 'ai' ? (
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {renderMarkdown(msg.text)}
                   {msg.sources && msg.sources.length > 0 && (
                     <div className="border-t border-gray-200 pt-2">
-                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500">Nguồn tham khảo</p>
-                      <div className="space-y-1">
+                      <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Nguồn tham khảo</p>
+                      <div className="space-y-1.5">
                         {msg.sources.map((source, index) => (
-                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer" className="block truncate text-[11px] font-medium text-[#0068FF] hover:underline">
+                          <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noreferrer" className="block truncate text-xs font-medium text-[#0068FF] hover:underline">
                             {source.title} ↗
                           </a>
                         ))}
@@ -599,41 +607,47 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
         ))}
 
         {hoiDapLoading && (
-          <div className="flex justify-start">
-            <div className="w-6 h-6 rounded-full bg-[#0068FF]/10 flex items-center justify-center shrink-0 mr-2">
-              <Sparkles size={11} className="text-[#0068FF]" />
+          <div className="flex items-end gap-2.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-[#0068FF]">
+              <Sparkles size={15} />
             </div>
-            <div className="bg-gray-50 rounded-2xl rounded-tl-sm px-3 py-2 border border-gray-100 flex items-center gap-1.5">
-              <Loader2 size={12} className="animate-spin text-[#0068FF]" />
-              <span className="text-xs text-gray-500">Đang soạn câu trả lời…</span>
+            <div role="status" className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-gray-100 bg-gray-50 px-4 py-3 text-sm text-gray-500">
+              <Loader2 size={15} className="animate-spin text-[#0068FF]" />
+              <span>Đang soạn câu trả lời…</span>
             </div>
+          </div>
+        )}
           </div>
         )}
       </div>
 
-      <div className="px-3 pb-3 pt-2 border-t border-gray-50">
-        <div className="flex items-center gap-2">
+      <form
+        onSubmit={(event) => { event.preventDefault(); handleHoiDap(); }}
+        className="flex-none border-t border-gray-100 bg-white px-3 py-3 sm:px-4"
+      >
+        <div className="mx-auto flex max-w-4xl items-center gap-2">
           <input
             type="text"
             value={cauHoi}
             onChange={(e) => setCauHoi(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleHoiDap()}
-            placeholder="Nhập câu hỏi của bạn…"
+            placeholder="Hỏi điều gì cũng được…"
+            aria-label="Nhập câu hỏi cho trợ lý AI"
             maxLength={500}
-            className="flex-1 px-3.5 py-2 rounded-xl border border-gray-200 bg-gray-50/50 text-sm text-[#141415] focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-[#0068FF]"
+            disabled={hoiDapLoading}
+            className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-[#141415] placeholder:text-gray-400 focus:border-[#0068FF] focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:opacity-60"
           />
           <button
-            onClick={() => handleHoiDap()}
+            type="submit"
             disabled={hoiDapLoading || !cauHoi.trim()}
             aria-label="Gửi câu hỏi"
-            className={`shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all ${hoiDapLoading || !cauHoi.trim() ? 'bg-gray-100 text-gray-300' : 'bg-[#0068FF] text-white hover:bg-[#0055D4] shadow-sm shadow-blue-200'}`}
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 ${hoiDapLoading || !cauHoi.trim() ? 'bg-gray-100 text-gray-300' : 'bg-[#0068FF] text-white hover:bg-[#0055D4]'}`}
           >
-            {hoiDapLoading ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
+            {hoiDapLoading ? <Loader2 size={17} className="animate-spin" /> : <Send size={17} />}
           </button>
         </div>
-        {hoiDapError && <p className="text-[10px] text-red-500 mt-1.5 pl-1">{hoiDapError}</p>}
-      </div>
-    </div>
+        <p className="mx-auto mt-2 max-w-4xl px-1 text-[11px] text-gray-400">Enter để gửi · Gemini chỉ dùng dữ liệu hóa đơn khi câu hỏi liên quan</p>
+      </form>
+    </section>
   );
 
   const footerActions = (
@@ -676,16 +690,16 @@ Trạng thái: ${isActuallyPaid ? 'ĐÃ THANH TOÁN' : 'CHƯA THANH TOÁN'}
     return (
       <div className="space-y-6">
         {roomSelector}
-        <div className="grid grid-cols-5 gap-4">
-          <div className="col-span-3 space-y-4">
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
+          <div className="space-y-4 xl:col-span-3">
             {billDetail}
             {footerActions}
           </div>
-          <div className="col-span-2 space-y-4">
+          <div className="space-y-4 xl:col-span-2">
             {aiPanel}
-            {hoiDapPanel}
           </div>
         </div>
+        {hoiDapPanel}
       </div>
     );
   }

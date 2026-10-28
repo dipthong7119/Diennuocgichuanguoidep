@@ -6,7 +6,6 @@ import {
   phanTichAIList, getLast3Months, getTieuThu, formatVND, formatThang,
   CURRENT_PERIOD,
 } from '../data/mockData';
-import AdminDashboardTable from './AdminDashboardTable';
 
 interface Props {
   desktop?: boolean;
@@ -391,9 +390,6 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
             )}
           </div>
         </div>
-
-        {/* ── Advanced Admin Dashboard (Table) ── */}
-        {isAdmin && <AdminDashboardTable token={localStorage.getItem('token')} />}
       </div>
     );
   }
@@ -615,13 +611,6 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
           </div>
         </div>
       </div>
-
-      {/* ── Advanced Admin Dashboard (Mobile) ── */}
-      {isAdmin && (
-        <div className="mx-4">
-          <AdminDashboardTable token={localStorage.getItem('token')} />
-        </div>
-      )}
     </div>
   );
 }

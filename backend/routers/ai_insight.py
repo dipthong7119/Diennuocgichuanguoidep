@@ -8,21 +8,26 @@ Phân quyền:
 """
 
 import json
+import logging
 import os
+import random
+import time
 import uuid
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from typing import List
 from dotenv import load_dotenv
 from urllib.request import Request as URLRequest, urlopen
+from urllib.error import HTTPError
 
 from database import get_db, HoaDon, ChiSoTieuThu, DongHo, PhanTichAI
 from schemas import AIInsightRequest, AIInsightResponse, AIQueryRequest, AIQueryResponse
 from routers.auth import require_login, require_admin
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai-insight", tags=["Phân Tích AI"])
 
@@ -44,16 +49,16 @@ USER_PROMPT_TEMPLATE = (
     "Chỉ nhắc đến rò rỉ nước khi số liệu nước thực sự cho thấy mức tăng đáng chú ý."
 )
 
-# System prompt riêng cho tính năng Hỏi-đáp có truy vấn dữ liệu (retrieval theo hộ).
-# Ràng buộc: CHỈ được trả lời dựa trên dữ liệu truy vấn được cung cấp trong prompt,
-# không tự bịa số liệu, không suy đoán ngoài phạm vi dữ liệu.
+# System prompt cho trợ lý đa chủ đề, chỉ dùng dữ liệu hộ khi câu hỏi liên quan.
 QUERY_SYSTEM_PROMPT = (
-    "System: Bạn là trợ lý điện nước thân thiện, trả lời bằng tiếng Việt tự nhiên và súc tích. "
-    "Nếu câu hỏi về hóa đơn hoặc mức tiêu thụ, chỉ dùng dữ liệu hộ được cung cấp; nêu kỳ và đơn vị rõ ràng, "
-    "không đoán số. Có thể mở đầu tự nhiên bằng 'Theo hóa đơn...' khi cần phân biệt dữ liệu. "
-    "Nếu câu hỏi là kiến thức chung, hãy trả lời trực tiếp, không ép mọi câu trả lời vào một mẫu cố định. "
-    "Với thông tin có thể thay đổi theo thời gian như giá điện, hãy dùng Google Search và dẫn nguồn; "
-    "nếu không xác minh được, nói ngắn gọn rằng chưa có nguồn cập nhật. "
+    "System: Bạn là trợ lý AI đa năng, thân thiện, trả lời bằng tiếng Việt tự nhiên và súc tích. "
+    "Bạn có thể trả lời câu hỏi ở nhiều chủ đề, không chỉ điện nước. Hãy xác định đúng ý người dùng "
+    "và trả lời thẳng vào câu hỏi; không lái câu hỏi chung sang hóa đơn hay điện nước. "
+    "Chỉ dùng dữ liệu lịch sử hộ được cung cấp khi người dùng hỏi về hóa đơn, chỉ số hoặc mức tiêu thụ "
+    "của hộ đó. Khi dùng dữ liệu, nêu kỳ và đơn vị rõ ràng, không đoán số; nếu thiếu dữ liệu thì nói rõ. "
+    "Không nhắc hoặc tiết lộ dữ liệu hộ trong câu trả lời cho chủ đề không liên quan. "
+    "Với thông tin mới hoặc có thể thay đổi theo thời gian, hãy nói rõ nếu không thể xác minh hiện tại; "
+    "không bịa nguồn hoặc khẳng định dữ liệu thời gian thực. "
     "Trình bày theo đoạn ngắn hoặc gạch đầu dòng khi hữu ích; tránh lời dẫn dài, lặp lại câu hỏi, "
     "các nhãn máy móc như 'dữ liệu thật/kiến thức chung', và mọi số liệu không có căn cứ."
 )
@@ -134,9 +139,10 @@ def _goi_ai_raw(system_prompt: str, user_prompt: str, fallback) -> str:
 
         # Thử lần lượt: model từ .env → mới nhất → cũ hơn
         models_to_try = list(dict.fromkeys([
-            os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
-            "gemini-2.5-flash",
+            os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
+            "gemini-3.5-flash-lite",
             "gemini-3.8-flash",
+            "gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-1.5-flash",
         ]))
@@ -202,7 +208,7 @@ def _goi_ai_raw(system_prompt: str, user_prompt: str, fallback) -> str:
 
 
 def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str, list[dict[str, str]]]:
-    """Trả lời hội thoại tự do; Gemini dùng Google Search cho câu hỏi cần dữ liệu mới."""
+    """Trả lời hội thoại tự do; chỉ bật Google Search khi cấu hình cho phép."""
     if os.getenv("AI_PROVIDER", "gemini").lower() != "gemini":
         return _goi_ai_raw(system_prompt, user_prompt, fallback), []
 
@@ -210,14 +216,16 @@ def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str
     if not api_key or api_key == "your_gemini_api_key_here":
         return fallback(), []
 
-    model_name = os.getenv("GEMINI_SEARCH_MODEL", "gemini-2.5-flash")
+    model_name = os.getenv("GEMINI_SEARCH_MODEL", "gemini-3.5-flash-lite")
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    thinking_level = "minimal" if "flash-lite" in model_name else "low"
     payload = {
         "systemInstruction": {"parts": [{"text": system_prompt}]},
         "contents": [{"parts": [{"text": user_prompt}]}],
-        "tools": [{"google_search": {}}],
-        "generationConfig": {"temperature": 0.2},
+        "generationConfig": {"thinkingConfig": {"thinkingLevel": thinking_level}},
     }
+    if os.getenv("GEMINI_ENABLE_GOOGLE_SEARCH", "false").strip().lower() in {"1", "true", "yes"}:
+        payload["tools"] = [{"google_search": {}}]
 
     try:
         request = URLRequest(
@@ -229,14 +237,36 @@ def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str
             },
             method="POST",
         )
-        with urlopen(request, timeout=30) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        for attempt in range(2):
+            try:
+                with urlopen(request, timeout=20) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                break
+            except HTTPError as exc:
+                if attempt == 1 or exc.code not in {408, 429, 500, 502, 503, 504}:
+                    raise
+                delay = 1 + random.random() * 0.25
+                logger.warning(
+                    "Transient Gemini HTTP %s; retrying once in %.2fs (model=%s)",
+                    exc.code, delay, model_name,
+                )
+                time.sleep(delay)
+            except TimeoutError:
+                if attempt == 1:
+                    raise
+                delay = 1 + random.random() * 0.25
+                logger.warning(
+                    "Gemini request timed out; retrying once in %.2fs (model=%s)",
+                    delay, model_name,
+                )
+                time.sleep(delay)
 
         candidate = (result.get("candidates") or [{}])[0]
         parts = candidate.get("content", {}).get("parts", [])
         answer = "\n".join(part["text"] for part in parts if part.get("text"))
         if not answer:
-            return fallback(), []
+            logger.warning("Gemini chat returned no text (model=%s)", model_name)
+            return "Gemini chưa trả về câu trả lời. Vui lòng thử lại sau.", []
 
         sources = []
         seen_urls = set()
@@ -250,9 +280,52 @@ def _goi_ai_hoi_dap(system_prompt: str, user_prompt: str, fallback) -> tuple[str
                     "url": url,
                 })
         return answer, sources[:5]
+    except HTTPError as exc:
+        try:
+            error_body = json.loads(exc.read().decode("utf-8"))
+            api_error = error_body.get("error", {})
+            api_status = api_error.get("status", "unknown")
+            api_message = api_error.get("message", "")
+        except Exception:
+            api_status = "unknown"
+            api_message = ""
+        logger.error(
+            "Gemini chat request failed (model=%s, http_status=%s, api_status=%s): %s",
+            model_name, exc.code, api_status, api_message[:500],
+        )
+        if exc.code == 401:
+            return "Gemini từ chối API key (401). Hãy kiểm tra khóa trong cấu hình Gemini.", []
+        if exc.code == 403:
+            return "Gemini chưa cấp quyền cho dự án/API key này (403). Hãy kiểm tra quyền và trạng thái dự án trong Google AI Studio.", []
+        if exc.code == 404:
+            return f"Model Gemini '{model_name}' không khả dụng (404). Hãy kiểm tra tên model trong cấu hình.", []
+        if exc.code in {429, 503}:
+            fallback_answer = fallback()
+            if fallback_answer.startswith(("Gemini không khả dụng", "Chatbot cần kết nối Gemini")):
+                if exc.code == 503:
+                    return "Gemini đang quá tải tạm thời (503). Hãy thử gửi lại sau ít phút.", []
+                return "Gemini từ chối yêu cầu với lỗi 429. Hãy kiểm tra đúng dự án gắn với API key và các giới hạn của model/tính năng trong Google AI Studio.", []
+            reason = "Gemini đang quá tải tạm thời (503)" if exc.code == 503 else "Gemini bị giới hạn yêu cầu (429)"
+            return (
+                f"{fallback_answer}\n\n"
+                f"({reason}; phần trên được tổng hợp trực tiếp từ dữ liệu hóa đơn.)",
+                [],
+            )
+        return f"Gemini gặp lỗi HTTP {exc.code}. Hãy kiểm tra log backend để biết chi tiết.", []
+    except TimeoutError:
+        logger.warning("Gemini chat request timed out (model=%s)", model_name)
+        fallback_answer = fallback()
+        if fallback_answer.startswith(("Gemini không khả dụng", "Chatbot cần kết nối Gemini")):
+            return "Gemini không phản hồi sau hai lần thử. Hãy thử lại sau; câu hỏi ngoài hóa đơn cần kết nối Gemini.", []
+        return (
+            f"{fallback_answer}\n\n"
+            "(Gemini không phản hồi sau hai lần thử; phần trên được tổng hợp trực tiếp từ dữ liệu hóa đơn.)",
+            [],
+        )
     except Exception:
-        # Không báo một câu trả lời chưa được kiểm chứng là thông tin hiện hành.
-        return fallback(), []
+        # Giữ lỗi API trong log backend thay vì biến mọi lỗi thành "chưa cấu hình".
+        logger.exception("Gemini chat request failed (model=%s)", model_name)
+        return "Không nhận được phản hồi từ Gemini. Hãy thử lại; nếu lỗi tiếp diễn, kiểm tra log backend.", []
 
 
 def _mock_response(mang_lich_su: List[int] | List[dict]) -> str:
@@ -318,7 +391,7 @@ def _mock_response(mang_lich_su: List[int] | List[dict]) -> str:
 
 def _truy_van_du_lieu_ho(db: Session, ma_ho: str, so_ky: int = 12) -> List[dict]:
     """
-    Truy vấn `so_ky` kỳ chỉ số/hóa đơn gần nhất của một hộ, ẨN DANH HÓA
+    Truy vấn tối đa `so_ky` tháng gần nhất của một hộ, ẨN DANH HÓA
     (không có tên chủ hộ/SĐT/mã phòng) — đây là bước "retrieval" trước khi
     đưa vào prompt cho AI trả lời câu hỏi tự do của người dùng.
     """
@@ -329,24 +402,45 @@ def _truy_van_du_lieu_ho(db: Session, ma_ho: str, so_ky: int = 12) -> List[dict]
     ma_dong_ho_list = [dh.MaDongHo for dh in dong_hos]
     loai_theo_dong_ho = {dh.MaDongHo: dh.Loai for dh in dong_hos}
 
+    # Giới hạn theo tháng phân biệt trước, rồi mới lấy mọi dòng đồng hồ của
+    # các tháng đó. Mỗi tháng thường có nhiều dòng (điện và nước), nên limit
+    # trực tiếp số dòng sẽ làm thiếu kỳ lịch sử.
+    thang_expr = func.strftime("%Y-%m", ChiSoTieuThu.ThangNam)
+    cac_ky_gan_nhat = [
+        row[0]
+        for row in (
+            db.query(thang_expr)
+            .filter(ChiSoTieuThu.MaDongHo.in_(ma_dong_ho_list))
+            .distinct()
+            .order_by(desc(thang_expr))
+            .limit(so_ky)
+            .all()
+        )
+    ]
+    if not cac_ky_gan_nhat:
+        return []
+
     chi_so_records = (
         db.query(ChiSoTieuThu)
-        .filter(ChiSoTieuThu.MaDongHo.in_(ma_dong_ho_list))
-        .order_by(desc(ChiSoTieuThu.ThangNam))
-        .limit(so_ky)
+        .filter(
+            ChiSoTieuThu.MaDongHo.in_(ma_dong_ho_list),
+            thang_expr.in_(cac_ky_gan_nhat),
+        )
+        .order_by(thang_expr.asc(), ChiSoTieuThu.ThangNam.asc(), ChiSoTieuThu.MaDongHo.asc())
         .all()
     )
 
     hoa_dons = {
-        hd.ThangNam: hd
+        hd.ThangNam.strftime("%Y-%m"): hd
         for hd in db.query(HoaDon).filter(HoaDon.MaHo == ma_ho).all()
     }
 
     ket_qua = []
-    for cs in reversed(chi_so_records):  # cũ → mới cho dễ đọc
-        hd = hoa_dons.get(cs.ThangNam)
+    for cs in chi_so_records:  # đã sắp xếp cũ → mới
+        thang = cs.ThangNam.strftime("%Y-%m")
+        hd = hoa_dons.get(thang)
         ket_qua.append({
-            "thang": cs.ThangNam.isoformat(),
+            "thang": thang,
             "loai": loai_theo_dong_ho.get(cs.MaDongHo, "?"),
             "tieu_thu": cs.ChiSoMoi - cs.ChiSoCu,
             "tong_tien_hoa_don_thang": hd.TongTien if hd else None,
@@ -422,20 +516,34 @@ def _dinh_dang_tien_chat(amount: float | int) -> str:
     return f"{int(amount):,}".replace(",", ".") + " đ"
 
 
+def _la_cau_hoi_gia_dien(cau_hoi: str) -> bool:
+    q = cau_hoi.lower()
+    asks_price = any(term in q for term in ("giá", "gia", "đơn giá", "don gia", "bao nhiêu tiền", "bao nhieu tien"))
+    asks_electricity = any(term in q for term in ("điện", "dien", "kwh", "số điện", "so dien"))
+    return asks_price and asks_electricity
+
+
 def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
     """
-    Phân tích thông minh từ dữ liệu thật khi chưa cấu hình AI API Key.
-    Tự động trả lời các câu hỏi phổ biến dựa trên dữ liệu truy vấn được.
+    Dự phòng cho các câu hỏi điện nước phổ biến khi Gemini không khả dụng.
     """
     q = cau_hoi.lower()
-    asks_electric_price = any(term in q for term in ("giá", "gia", "bao nhiêu", "bao nhieu")) and any(
-        term in q for term in ("điện", "dien", "kwh", "số điện", "so dien")
+    household_terms = (
+        "điện", "dien", "nước", "nuoc", "hóa đơn", "hoa don", "tiêu thụ", "tieu thu",
+        "chỉ số", "chi so", "kwh", "m³", "đồng hồ", "dong ho", "thanh toán", "thanh toan",
+        "rò rỉ", "ro ri", "tiết kiệm điện", "tiet kiem dien", "tiết kiệm nước", "tiet kiem nuoc",
     )
-    if asks_electric_price:
+    if not any(term in q for term in household_terms):
+        return (
+            "Chatbot cần kết nối Gemini để trả lời câu hỏi ngoài chủ đề điện nước. "
+            "Hiện Gemini không khả dụng; vui lòng kiểm tra cấu hình API và kết nối rồi thử lại."
+        )
+
+    if _la_cau_hoi_gia_dien(q):
         return (
             "Biểu giá điện sinh hoạt được chia theo bậc tiêu thụ nên không có một mức chung cho mọi kWh. "
-            "Nhà cho thuê có thể áp dụng cách tính riêng. Hiện Gemini chưa được cấu hình nên tôi chưa thể "
-            "xác minh mức giá mới nhất; bạn có thể xem nguồn EVN bên dưới."
+            "Nhà cho thuê có thể áp dụng cách tính riêng. Mình chưa thể xác minh mức giá mới nhất; "
+            "bạn có thể xem nguồn EVN bên dưới."
         )
 
     if not du_lieu:
@@ -480,7 +588,7 @@ def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
         return "\n".join(lines) if len(lines) > 1 else "Chưa có thông tin thanh toán cho các kỳ này."
 
     # ── Câu hỏi về hóa đơn / tổng tiền ──────────────────────────────────────
-    if any(k in q for k in ["hóa đơn", "hoa don", "tiền", "tien", "bao nhiêu", "bao nhieu"]):
+    if any(k in q for k in ["hóa đơn", "hoa don", "tiền", "tien"]):
         lines = ["**Các hóa đơn gần đây**"]
         thang_list = sorted(set(r["thang"] for r in du_lieu))
         for thang in thang_list:
@@ -540,18 +648,10 @@ def _mock_query_response(du_lieu: List[dict], cau_hoi: str) -> str:
             ])
         return "\n".join(lines)
 
-    # ── Câu trả lời mặc định (không khớp câu hỏi nào) ───────────────────────
-    thang_list = sorted(set(r["thang"] for r in du_lieu))
-    lines = [
-        f"Tôi có dữ liệu {len(thang_list)} kỳ, từ {_dinh_dang_ky_chat(thang_list[0])} đến {_dinh_dang_ky_chat(thang_list[-1])}.",
-        "",
-        "Bạn có thể hỏi, chẳng hạn:",
-        "• Kỳ nào dùng điện hoặc nước nhiều nhất?",
-        "• Hóa đơn nào còn chưa thanh toán?",
-        "• Tóm tắt mức tiêu thụ gần đây.",
-        "• Cho tôi vài mẹo tiết kiệm điện nước.",
-    ]
-    return "\n".join(lines)
+    return (
+        "Gemini không khả dụng nên mình chưa thể trả lời đúng câu hỏi này. "
+        "Hãy thử lại sau hoặc kiểm tra log backend để biết lỗi kết nối."
+    )
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -668,7 +768,7 @@ def hoi_dap_ai(
     Cho phép người dùng đặt câu hỏi tự do về dữ liệu tiêu thụ/hóa đơn hoặc câu hỏi chung.
 
     Luồng xử lý:
-    1. **Truy vấn (Retrieval)**: lấy tối đa 12 kỳ chỉ số/hóa đơn gần nhất của hộ từ CSDL,
+    1. **Truy vấn (Retrieval)**: lấy tối đa 12 tháng gần nhất của hộ từ CSDL,
        ẩn danh hóa (không có tên/SĐT/mã phòng).
     2. **Augmentation**: chèn dữ liệu và câu hỏi vào prompt.
     3. **Generation**: AI trả lời dựa trên dữ liệu nếu câu hỏi về dữ liệu hộ;
@@ -696,17 +796,13 @@ def hoi_dap_ai(
             f"Câu hỏi: {payload.cau_hoi}"
         )
 
-        # 4. Hỏi AI tự do; Gemini có thể tra cứu Google Search cho thông tin mới.
+        # 4. Hỏi AI tự do; dùng nguồn nội bộ cho dữ liệu hộ.
         tra_loi, sources = _goi_ai_hoi_dap(
             QUERY_SYSTEM_PROMPT,
             user_prompt,
             fallback=lambda: _mock_query_response(du_lieu, payload.cau_hoi),
         )
-        question = payload.cau_hoi.lower()
-        asks_electric_price = any(term in question for term in ("giá", "gia", "bao nhiêu", "bao nhieu")) and any(
-            term in question for term in ("điện", "dien", "kwh", "số điện", "so dien")
-        )
-        if asks_electric_price and not sources:
+        if _la_cau_hoi_gia_dien(payload.cau_hoi) and not sources:
             sources = [{
                 "title": "Biểu giá bán lẻ điện – EVN",
                 "url": "https://evn.com.vn/d/vi-VN/news/Bieu-gia-ban-le-dien-theo-Quyet-dinh-so-1279QD-BCTngay-0952025-cua-Bo-Cong-Thuong-60-28-502668",
