@@ -30,6 +30,7 @@ Chatbot hỏi-đáp hỗ trợ cả kiến thức chung (mẹo tiết kiệm, th
 8. SMS nhắc nợ quá hạn
 - Hệ thống kiểm tra mỗi ngày lúc 09:00 theo giờ Việt Nam.
 - Gửi tối đa một SMS cho mỗi phòng trong một tháng nếu phòng còn hóa đơn chưa thanh toán từ 3 tháng trở lên.
+- Quản trị viên có thể bấm **Gửi nhắc nợ ngay** trong mục Danh sách người dùng; API tương ứng là `POST /thong-ke/nhac-no/gui-ngay`.
 - Sao chép .env.example thành .env, đặt SMS_ENABLED=true và điền TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER.
 - Số điện thoại Việt Nam lưu dạng 0xxxxxxxxx sẽ được chuyển sang +84 khi gửi. Chỉ gửi được khi tài khoản Twilio và số gửi đã hoạt động.
 

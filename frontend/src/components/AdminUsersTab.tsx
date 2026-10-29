@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MapPin, Phone, Search, ShieldCheck, Users } from 'lucide-react';
+import { LoaderCircle, MapPin, Phone, Search, Send, ShieldCheck, Users } from 'lucide-react';
 
 interface UserRow {
   username: string;
@@ -22,12 +22,49 @@ interface SmsStatus {
   schedule: string;
 }
 
+interface SmsResult {
+  sent: number;
+  skipped: number;
+  failed: number;
+  ready: boolean;
+}
+
 export default function AdminUsersTab({ onSessionExpired }: Props) {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [smsStatus, setSmsStatus] = useState<SmsStatus | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sendingSms, setSendingSms] = useState(false);
+  const [smsResult, setSmsResult] = useState<SmsResult | null>(null);
+  const [smsError, setSmsError] = useState('');
+
+  async function sendOverdueReminders() {
+    const token = localStorage.getItem('token');
+    if (!token || sendingSms) return;
+
+    setSendingSms(true);
+    setSmsError('');
+    setSmsResult(null);
+    try {
+      const response = await fetch('/thong-ke/nhac-no/gui-ngay', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.status === 401) {
+        onSessionExpired?.();
+        return;
+      }
+      if (!response.ok) throw new Error('Không thể gửi SMS nhắc nợ.');
+      const result: SmsResult = await response.json();
+      setSmsResult(result);
+      if (!result.ready) setSmsError('SMS chưa sẵn sàng. Hãy kiểm tra cấu hình Twilio trong backend/.env.');
+    } catch (sendError) {
+      setSmsError(sendError instanceof Error ? sendError.message : 'Gửi SMS thất bại.');
+    } finally {
+      setSendingSms(false);
+    }
+  }
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -82,14 +119,38 @@ export default function AdminUsersTab({ onSessionExpired }: Props) {
       </section>
 
       <section className={`rounded-2xl border p-4 ${smsStatus?.ready ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}`}>
-        <p className={`text-sm font-semibold ${smsStatus?.ready ? 'text-emerald-800' : 'text-amber-900'}`}>
-          {smsStatus?.ready ? 'SMS nhắc nợ đã sẵn sàng' : 'SMS nhắc nợ chưa được bật'}
-        </p>
-        <p className={`mt-1 text-xs leading-relaxed ${smsStatus?.ready ? 'text-emerald-800/80' : 'text-amber-900/80'}`}>
-          {smsStatus?.ready
-            ? `Hệ thống tự nhắn ${smsStatus.schedule.toLowerCase()} khi phòng có hóa đơn chưa thanh toán từ 3 tháng trở lên.`
-            : 'Để bật, đặt SMS_ENABLED=true và điền tài khoản Twilio trong backend/.env. Tin nhắn chỉ gửi khi dịch vụ đã cấu hình đầy đủ.'}
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <p className={`text-sm font-semibold ${smsStatus?.ready ? 'text-emerald-800' : 'text-amber-900'}`}>
+              {smsStatus?.ready ? 'SMS nhắc nợ đã sẵn sàng' : 'SMS nhắc nợ chưa được bật'}
+            </p>
+            <p className={`mt-1 text-xs leading-relaxed ${smsStatus?.ready ? 'text-emerald-800/80' : 'text-amber-900/80'}`}>
+              {smsStatus?.ready
+                ? `Hệ thống tự nhắn ${smsStatus.schedule.toLowerCase()} khi phòng có hóa đơn chưa thanh toán từ 3 tháng trở lên.`
+                : 'Để bật, đặt SMS_ENABLED=true và điền tài khoản Twilio trong backend/.env. Tin nhắn chỉ gửi khi dịch vụ đã cấu hình đầy đủ.'}
+            </p>
+            {smsStatus?.ready && (
+              <p className="mt-1 text-xs text-emerald-800/80">Mỗi phòng chỉ nhận tối đa một tin nhắc nợ trong tháng.</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={sendOverdueReminders}
+            disabled={!smsStatus?.ready || sendingSms}
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0068FF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          >
+            {sendingSms ? <LoaderCircle size={16} className="animate-spin" /> : <Send size={16} />}
+            {sendingSms ? 'Đang gửi…' : 'Gửi nhắc nợ ngay'}
+          </button>
+        </div>
+        {smsResult && !smsError && (
+          <p role="status" className={`mt-3 text-sm ${smsResult.failed ? 'text-amber-800' : 'text-emerald-800'}`}>
+            {smsResult.sent === 0 && smsResult.skipped === 0 && smsResult.failed === 0
+              ? 'Hiện không có phòng nào đủ điều kiện nhận nhắc nợ.'
+              : `Đã gửi ${smsResult.sent} tin, bỏ qua ${smsResult.skipped} phòng, lỗi ${smsResult.failed} tin.`}
+          </p>
+        )}
+        {smsError && <p role="alert" className="mt-3 text-sm text-rose-700">{smsError}</p>}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">

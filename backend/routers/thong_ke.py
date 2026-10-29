@@ -13,7 +13,7 @@ from typing import List
 
 from database import get_db, HoaDon, HoGiaDinh, DongHo, ChiSoTieuThu
 from routers.auth import require_login, require_admin
-from services.nhac_no import sms_configuration
+from services.nhac_no import send_overdue_reminders, sms_configuration
 
 router = APIRouter(prefix="/thong-ke", tags=["Thống Kê"])
 
@@ -326,4 +326,13 @@ def trang_thai_nhac_no(
     current_user: dict = Depends(require_admin),
 ):
     return sms_configuration()
+
+
+@router.post("/nhac-no/gui-ngay", summary="Gửi SMS nhắc nợ ngay (chỉ admin)")
+def gui_nhac_no_ngay(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin),
+):
+    """Gửi nhắc nợ cho các hộ đủ điều kiện, áp dụng giới hạn một lần mỗi tháng."""
+    return send_overdue_reminders(db)
 

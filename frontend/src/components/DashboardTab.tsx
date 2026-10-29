@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Zap, Droplets, Sparkles, TrendingUp, TrendingDown, Minus, ChevronRight, ChevronLeft, ChevronRight as ChevronRightIcon } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, Tooltip } from 'recharts';
 import {
-  hoGiaDinhList, dongHoList, chiSoTieuThuList, hoaDonList,
-  phanTichAIList, getLast3Months, getTieuThu, formatVND, formatThang,
+  hoGiaDinhList, chiSoTieuThuList, hoaDonList,
+  phanTichAIList, formatVND, formatThang,
   CURRENT_PERIOD,
 } from '../data/mockData';
 
@@ -14,8 +14,79 @@ interface Props {
   onSessionExpired?: () => void;
 }
 
-export default function DashboardTab({ desktop = false, userRole = 'user', userMaHo = null }: Props) {
+interface MonthlyUsage {
+  thang: string;
+  tieu_thu: number;
+}
+
+interface RoomHistory {
+  dien: MonthlyUsage[];
+  nuoc: MonthlyUsage[];
+}
+
+interface RoomInvoice {
+  ThangNam: string;
+  TongTien: number;
+}
+
+function monthKey(value: string): string {
+  return value.slice(0, 7);
+}
+
+function usageForMonth(readings: MonthlyUsage[], period: string): number {
+  return readings
+    .filter(reading => monthKey(reading.thang) === period)
+    .reduce((total, reading) => total + reading.tieu_thu, 0);
+}
+
+function previousMonth(period: string): string {
+  const [year, month] = period.split('-').map(Number);
+  const previous = new Date(year, month - 2, 1);
+  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function preferredPeriod(periods: string[]): string {
+  const now = new Date();
+  const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return periods.find(period => period === currentPeriod)
+    ?? periods.find(period => period <= currentPeriod)
+    ?? periods[0]
+    ?? CURRENT_PERIOD;
+}
+
+export default function DashboardTab({ desktop = false, userRole = 'user', userMaHo = null, onSessionExpired }: Props) {
   const isAdmin = userRole === 'admin';
+  const [totalRevenue, setTotalRevenue] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    let cancelled = false;
+    fetch('/thong-ke/tong-quan', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async response => {
+        if (response.status === 401) {
+          onSessionExpired?.();
+          return null;
+        }
+        if (!response.ok) throw new Error('Không tải được tổng doanh thu.');
+        return response.json() as Promise<{ tong_doanh_thu: number }>;
+      })
+      .then(summary => {
+        if (!cancelled && summary) setTotalRevenue(summary.tong_doanh_thu);
+      })
+      .catch(() => {
+        if (!cancelled) setTotalRevenue(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, onSessionExpired]);
 
   // Admin: có thể chọn phòng bất kỳ; user: chỉ xem phòng của mình
   const defaultHo = isAdmin
@@ -23,36 +94,90 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
     : (userMaHo ?? hoGiaDinhList[0].MaHo);
 
   const [selectedHo, setSelectedHo] = useState(defaultHo);
+  const [roomHistory, setRoomHistory] = useState<RoomHistory>({ dien: [], nuoc: [] });
+  const [roomInvoices, setRoomInvoices] = useState<RoomInvoice[]>([]);
+  const [availablePeriods, setAvailablePeriods] = useState<string[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState(CURRENT_PERIOD);
+  const [roomDataLoading, setRoomDataLoading] = useState(true);
+  const [roomDataError, setRoomDataError] = useState('');
 
   // Reset về phòng đúng khi user thay đổi (nếu không phải admin)
   const effectiveHo = isAdmin ? selectedHo : (userMaHo ?? hoGiaDinhList[0].MaHo);
 
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setRoomDataLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRoomDataLoading(true);
+    setRoomDataError('');
+    setRoomHistory({ dien: [], nuoc: [] });
+    setRoomInvoices([]);
+    setAvailablePeriods([]);
+
+    void (async () => {
+      try {
+        const headers = { Authorization: `Bearer ${token}` };
+        const [historyResponse, invoicesResponse] = await Promise.all([
+          fetch(`/thong-ke/tieu-thu-theo-ho/${effectiveHo}`, { headers }),
+          fetch(`/chi-so/hoa-don/${effectiveHo}`, { headers }),
+        ]);
+
+        if (historyResponse.status === 401 || invoicesResponse.status === 401) {
+          onSessionExpired?.();
+          return;
+        }
+        if (!historyResponse.ok || !invoicesResponse.ok) {
+          throw new Error('Không tải được lịch sử phòng.');
+        }
+
+        const [history, invoices] = await Promise.all([
+          historyResponse.json() as Promise<RoomHistory>,
+          invoicesResponse.json() as Promise<RoomInvoice[]>,
+        ]);
+        if (cancelled) return;
+
+        setRoomHistory(history);
+        setRoomInvoices(Array.isArray(invoices) ? invoices : []);
+        const periods = [...new Set([
+          ...history.dien.map(reading => monthKey(reading.thang)),
+          ...history.nuoc.map(reading => monthKey(reading.thang)),
+          ...(Array.isArray(invoices) ? invoices.map(invoice => monthKey(invoice.ThangNam)) : []),
+        ])].sort((left, right) => right.localeCompare(left));
+        setAvailablePeriods(periods);
+        setSelectedPeriod(preferredPeriod(periods));
+      } catch {
+        if (!cancelled) setRoomDataError('Không tải được lịch sử phòng.');
+      } finally {
+        if (!cancelled) setRoomDataLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveHo, onSessionExpired]);
+
   const ho = hoGiaDinhList.find(h => h.MaHo === effectiveHo) ?? hoGiaDinhList[0];
-  const hoaDon = hoaDonList.find(hd => hd.MaHo === effectiveHo && hd.ThangNam === CURRENT_PERIOD);
-
-  // Tiêu thụ kỳ hiện tại
-  const dienTieuThu = getTieuThu(effectiveHo, 'Dien', CURRENT_PERIOD);
-  const nuocTieuThu = getTieuThu(effectiveHo, 'Nuoc', CURRENT_PERIOD);
-  const dienDonGia = dongHoList.find(d => d.MaHo === effectiveHo && d.Loai === 'Dien')?.DonGia || 3000;
-  const nuocDonGia = dongHoList.find(d => d.MaHo === effectiveHo && d.Loai === 'Nuoc')?.DonGia || 15000;
-  const tongTamTinh = dienTieuThu * dienDonGia + nuocTieuThu * nuocDonGia;
-
-  // Tiêu thụ tháng trước để tính trend
-  const dienPrev = getTieuThu(effectiveHo, 'Dien', '2026-02');
-  const nuocPrev = getTieuThu(effectiveHo, 'Nuoc', '2026-02');
+  const dienTieuThu = usageForMonth(roomHistory.dien, selectedPeriod);
+  const nuocTieuThu = usageForMonth(roomHistory.nuoc, selectedPeriod);
+  const invoiceForPeriod = roomInvoices.find(invoice => monthKey(invoice.ThangNam) === selectedPeriod);
+  const previous = previousMonth(selectedPeriod);
+  const dienPrev = usageForMonth(roomHistory.dien, previous);
+  const nuocPrev = usageForMonth(roomHistory.nuoc, previous);
   const dienTrend = dienPrev > 0 ? ((dienTieuThu - dienPrev) / dienPrev * 100) : 0;
   const nuocTrend = nuocPrev > 0 ? ((nuocTieuThu - nuocPrev) / nuocPrev * 100) : 0;
 
-  // AI insight cho phòng hiện tại
-  const aiInsight = phanTichAIList.find(ai => ai.MaHoaDon === hoaDon?.MaHoaDon);
-
-  // Chart data — 3 tháng
-  const dien3m = getLast3Months(effectiveHo, 'Dien');
-  const nuoc3m = getLast3Months(effectiveHo, 'Nuoc');
-  const chartData = dien3m.map((d, i) => ({
-    thang: formatThang(d.thang),
-    dien: d.tieuThu,
-    nuoc: nuoc3m[i]?.tieuThu || 0,
+  const chartPeriods = [...new Set([...roomHistory.dien, ...roomHistory.nuoc]
+    .map(reading => monthKey(reading.thang)))
+  ].filter(period => period <= selectedPeriod).sort().slice(-3);
+  const chartData = chartPeriods.map(period => ({
+    thang: formatThang(period),
+    dien: usageForMonth(roomHistory.dien, period),
+    nuoc: usageForMonth(roomHistory.nuoc, period),
   }));
 
   // Tổng hợp tất cả phòng cho admin summary
@@ -63,10 +188,6 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
   const tongNuocAll = chiSoTieuThuList
     .filter(c => c.ThangNam === CURRENT_PERIOD && c.MaDongHo.includes('-N'))
     .reduce((s, c) => s + (c.ChiSoMoi - c.ChiSoCu), 0);
-  const tongDoanhThu = hoaDonList
-    .filter(hd => hd.ThangNam === CURRENT_PERIOD)
-    .reduce((s, hd) => s + hd.TongTien, 0);
-
   // Cảnh báo nổi bật — admin thấy tất cả, user chỉ thấy của phòng mình
   const alertsAll = phanTichAIList
     .filter(a => {
@@ -89,6 +210,32 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
     const next = hoGiaDinhList[(currentHoIndex + 1) % hoGiaDinhList.length];
     setSelectedHo(next.MaHo);
   };
+
+  function PeriodSelector({ compact = false }: { compact?: boolean }) {
+    return (
+      <select
+        aria-label="Chọn tháng xem chi tiết phòng"
+        value={selectedPeriod}
+        onChange={event => setSelectedPeriod(event.target.value)}
+        disabled={roomDataLoading || availablePeriods.length === 0}
+        className={`rounded-lg border border-gray-200 bg-white font-semibold text-[#0068FF] outline-none focus:border-[#0068FF] disabled:cursor-wait disabled:text-gray-400 ${compact ? 'px-2 py-1 text-[10px]' : 'px-3 py-1.5 text-xs'}`}
+      >
+        {availablePeriods.length > 0
+          ? availablePeriods.map(period => <option key={period} value={period}>{formatThang(period)}</option>)
+          : <option value={selectedPeriod}>{roomDataLoading ? 'Đang tải tháng…' : 'Không có dữ liệu'}</option>}
+      </select>
+    );
+  }
+
+  const displayedUsage = (usage: number) =>
+    roomDataLoading ? '…' : roomDataError ? '—' : usage;
+  const displayedInvoice = roomDataLoading
+    ? '…'
+    : roomDataError
+      ? '—'
+      : invoiceForPeriod
+        ? formatVND(invoiceForPeriod.TongTien)
+        : '—';
 
   function TrendIcon({ value }: { value: number }) {
     if (Math.abs(value) < 2) return <Minus size={14} className="text-gray-400" />;
@@ -178,16 +325,16 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
               <p className="text-xs text-gray-400 mt-1">phòng đang quản lý</p>
             </div>
 
-            {/* Doanh thu kỳ */}
+            {/* Tổng doanh thu tất cả kỳ */}
             <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 rounded-xl bg-emerald-50 flex items-center justify-center">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>
                 </div>
-                <span className="text-sm text-gray-500 font-medium">Doanh thu kỳ</span>
+                <span className="text-sm text-gray-500 font-medium">Tổng doanh thu</span>
               </div>
-              <p className="text-xl font-bold text-[#141415]">{formatVND(tongDoanhThu)}</p>
-              <p className="text-xs text-gray-400 mt-1">{formatThang(CURRENT_PERIOD)}</p>
+              <p className="text-xl font-bold text-[#141415]">{totalRevenue === null ? '—' : formatVND(totalRevenue)}</p>
+              <p className="text-xs text-gray-400 mt-1">Tất cả các kỳ</p>
             </div>
 
             {/* Tổng điện */}
@@ -243,17 +390,16 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
                     </>
                   )}
                 </div>
-                <span className="text-xs px-3 py-1 rounded-full bg-blue-50 text-[#0068FF] font-semibold">
-                  {formatThang(CURRENT_PERIOD)}
-                </span>
+                <PeriodSelector />
               </div>
+              {roomDataError && <p role="alert" className="mb-3 text-xs text-rose-600">{roomDataError}</p>}
               <div className="grid grid-cols-3 gap-4">
                 <div className="text-center bg-amber-50 rounded-xl p-4">
                   <div className="flex items-center justify-center gap-2 mb-2">
                     <Zap size={16} className="text-amber-500" />
                     <TrendBadge value={dienTrend} />
                   </div>
-                  <p className="text-2xl font-bold text-[#141415]">{dienTieuThu}</p>
+                  <p className="text-2xl font-bold text-[#141415]">{displayedUsage(dienTieuThu)}</p>
                   <p className="text-xs text-gray-500 mt-1">kWh điện</p>
                 </div>
                 <div className="text-center bg-sky-50 rounded-xl p-4">
@@ -261,13 +407,13 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
                     <Droplets size={16} className="text-sky-500" />
                     <TrendBadge value={nuocTrend} />
                   </div>
-                  <p className="text-2xl font-bold text-[#141415]">{nuocTieuThu}</p>
+                  <p className="text-2xl font-bold text-[#141415]">{displayedUsage(nuocTieuThu)}</p>
                   <p className="text-xs text-gray-500 mt-1">m³ nước</p>
                 </div>
                 <div className="text-center bg-blue-50 rounded-xl p-4">
-                  <p className="text-xs text-gray-500 mb-2">Tạm tính</p>
-                  <p className="text-xl font-bold text-[#0068FF]">{formatVND(tongTamTinh)}</p>
-                  <p className="text-xs text-gray-500 mt-1">ước tính</p>
+                  <p className="text-xs text-gray-500 mb-2">Hóa đơn</p>
+                  <p className="text-xl font-bold text-[#0068FF]">{displayedInvoice}</p>
+                  <p className="text-xs text-gray-500 mt-1">{formatThang(selectedPeriod)}</p>
                 </div>
               </div>
             </div>
@@ -275,7 +421,7 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
             {/* Chart */}
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-base font-semibold text-[#141415]">Tiêu thụ 3 tháng gần nhất</h2>
+                <h2 className="text-base font-semibold text-[#141415]">Tiêu thụ 3 tháng đến {formatThang(selectedPeriod)}</h2>
                 <span className="text-xs text-gray-400">Phòng {ho.MaPhong}</span>
               </div>
               <div className="h-52">
@@ -411,15 +557,16 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
             <p className="text-2xl font-bold text-[#141415]">{tongPhong}</p>
           </div>
 
-          {/* Doanh thu kỳ */}
+          {/* Tổng doanh thu tất cả kỳ */}
           <div className="bg-white rounded-2xl p-3.5 shadow-sm border border-gray-50">
             <div className="flex items-center gap-2 mb-2">
               <div className="w-8 h-8 rounded-xl bg-emerald-50 flex items-center justify-center">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/></svg>
               </div>
-              <span className="text-xs text-gray-400 font-medium">Doanh thu kỳ</span>
+              <span className="text-xs text-gray-400 font-medium">Tổng doanh thu</span>
             </div>
-            <p className="text-lg font-bold text-[#141415]">{formatVND(tongDoanhThu)}</p>
+            <p className="text-lg font-bold text-[#141415]">{totalRevenue === null ? '—' : formatVND(totalRevenue)}</p>
+            <p className="mt-1 text-[10px] text-gray-400">Tất cả các kỳ</p>
           </div>
 
           {/* Tổng điện */}
@@ -488,17 +635,16 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
               </>
             )}
           </div>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-50 text-[#0068FF] font-semibold">
-            {formatThang(CURRENT_PERIOD)}
-          </span>
+          <PeriodSelector compact />
         </div>
+        {roomDataError && <p role="alert" className="mb-3 text-xs text-rose-600">{roomDataError}</p>}
         <div className="grid grid-cols-3 gap-3">
           <div className="text-center">
             <div className="flex items-center justify-center gap-1 mb-1">
               <Zap size={14} className="text-amber-500" />
               <TrendBadge value={dienTrend} />
             </div>
-            <p className="text-xl font-bold text-[#141415]">{dienTieuThu}</p>
+            <p className="text-xl font-bold text-[#141415]">{displayedUsage(dienTieuThu)}</p>
             <p className="text-[10px] text-gray-400">kWh</p>
           </div>
           <div className="text-center">
@@ -506,12 +652,12 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
               <Droplets size={14} className="text-sky-500" />
               <TrendBadge value={nuocTrend} />
             </div>
-            <p className="text-xl font-bold text-[#141415]">{nuocTieuThu}</p>
+            <p className="text-xl font-bold text-[#141415]">{displayedUsage(nuocTieuThu)}</p>
             <p className="text-[10px] text-gray-400">m³</p>
           </div>
           <div className="text-center">
-            <p className="text-[10px] text-gray-400 mb-1">Tạm tính</p>
-            <p className="text-lg font-bold text-[#0068FF]">{formatVND(tongTamTinh)}</p>
+            <p className="text-[10px] text-gray-400 mb-1">Hóa đơn</p>
+            <p className="text-lg font-bold text-[#0068FF]">{displayedInvoice}</p>
           </div>
         </div>
       </div>
@@ -572,7 +718,7 @@ export default function DashboardTab({ desktop = false, userRole = 'user', userM
       {/* ── Biểu đồ tiêu thụ 3 tháng ─────────────────────── */}
       <div className="mx-4 bg-white rounded-2xl p-4 shadow-sm border border-gray-50">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-[#141415]">Tiêu thụ 3 tháng gần nhất</h2>
+          <h2 className="text-sm font-semibold text-[#141415]">Tiêu thụ 3 tháng đến {formatThang(selectedPeriod)}</h2>
           <span className="text-[10px] text-gray-400">Phòng {ho.MaPhong}</span>
         </div>
 

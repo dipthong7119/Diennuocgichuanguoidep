@@ -5,13 +5,18 @@ import os
 import re
 import uuid
 from datetime import date, datetime
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 
 from database import HoaDon, HoGiaDinh, LogNhacNo
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 def sms_configuration() -> dict:
@@ -78,7 +83,7 @@ def send_overdue_reminders(db: Session, today: date | None = None) -> dict:
     if not config["ready"]:
         return {"sent": 0, "skipped": 0, "failed": 0, "ready": False}
 
-    today = today or date.today()
+    today = today or datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).date()
     reminder_period = today.strftime("%Y-%m")
     rows = (
         db.query(HoaDon, HoGiaDinh)
