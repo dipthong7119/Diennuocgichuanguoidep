@@ -45,6 +45,8 @@ def _send_scheduled_reminders():
         )
         if result["ready"] and (result["sent"] or result["failed"]):
             print(f"[SMS] Đã gửi {result['sent']} tin, lỗi {result['failed']}.")
+            for error in result.get("errors", []):
+                print(f"[SMS] {error['count']} tin thất bại: {error['reason']}")
     finally:
         db.close()
 

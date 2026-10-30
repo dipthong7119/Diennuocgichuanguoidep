@@ -15,78 +15,97 @@ interface Props {
   onSessionExpired?: () => void;
 }
 
-interface SmsStatus {
-  enabled: boolean;
-  configured: boolean;
-  ready: boolean;
-  schedule: string;
-}
-
-interface SmsResult {
-  sent: number;
-  skipped: number;
-  failed: number;
-  ready: boolean;
+interface SmsFeedback {
+  success: boolean;
+  message: string;
 }
 
 export default function AdminUsersTab({ onSessionExpired }: Props) {
   const [users, setUsers] = useState<UserRow[]>([]);
-  const [smsStatus, setSmsStatus] = useState<SmsStatus | null>(null);
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [senderPhone, setSenderPhone] = useState('');
+  const [smsReady, setSmsReady] = useState(false);
+  const [trialMode, setTrialMode] = useState(false);
+  const [smsIssues, setSmsIssues] = useState<string[]>([]);
+  const [sendingSms, setSendingSms] = useState(false);
+  const [smsFeedback, setSmsFeedback] = useState<SmsFeedback | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [sendingSms, setSendingSms] = useState(false);
-  const [smsResult, setSmsResult] = useState<SmsResult | null>(null);
-  const [smsError, setSmsError] = useState('');
-
-  async function sendOverdueReminders() {
-    const token = localStorage.getItem('token');
-    if (!token || sendingSms) return;
-
-    setSendingSms(true);
-    setSmsError('');
-    setSmsResult(null);
-    try {
-      const response = await fetch('/thong-ke/nhac-no/gui-ngay', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.status === 401) {
-        onSessionExpired?.();
-        return;
-      }
-      if (!response.ok) throw new Error('Không thể gửi SMS nhắc nợ.');
-      const result: SmsResult = await response.json();
-      setSmsResult(result);
-      if (!result.ready) setSmsError('SMS chưa sẵn sàng. Hãy kiểm tra cấu hình Twilio trong backend/.env.');
-    } catch (sendError) {
-      setSmsError(sendError instanceof Error ? sendError.message : 'Gửi SMS thất bại.');
-    } finally {
-      setSendingSms(false);
-    }
-  }
 
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
     const headers = { Authorization: `Bearer ${token}` };
-    Promise.all([
-      fetch('/auth/users', { headers }),
-      fetch('/thong-ke/nhac-no/trang-thai', { headers }),
-    ])
-      .then(async ([usersResponse, smsResponse]) => {
-        if (usersResponse.status === 401 || smsResponse.status === 401) {
+    fetch('/auth/users', { headers })
+      .then(async usersResponse => {
+        if (usersResponse.status === 401) {
           onSessionExpired?.();
           return;
         }
         if (!usersResponse.ok) throw new Error('Không tải được danh sách người dùng.');
-        const [userData, smsData] = await Promise.all([usersResponse.json(), smsResponse.json()]);
+        const userData = await usersResponse.json();
         setUsers(Array.isArray(userData) ? userData : []);
-        setSmsStatus(smsData);
       })
       .catch(() => setError('Không tải được thông tin người dùng.'))
       .finally(() => setLoading(false));
+
+    fetch('/thong-ke/nhac-no/trang-thai', { headers })
+      .then(async response => {
+        if (response.status === 401) {
+          onSessionExpired?.();
+          return;
+        }
+        if (!response.ok) return;
+        const smsStatus = await response.json();
+        setSenderPhone(typeof smsStatus.sender === 'string' ? smsStatus.sender : '');
+        setSmsReady(Boolean(smsStatus.ready));
+        setTrialMode(Boolean(smsStatus.trial_mode));
+        setSmsIssues(Array.isArray(smsStatus.issues) ? smsStatus.issues : []);
+      })
+      .catch(() => undefined);
   }, [onSessionExpired]);
+
+  async function sendSms() {
+    const token = localStorage.getItem('token');
+    if (!token || sendingSms || !smsReady || !recipientPhone.trim()) return;
+
+    setSendingSms(true);
+    setSmsFeedback(null);
+    try {
+      const response = await fetch('/thong-ke/nhac-no/gui-mot', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ to_phone: recipientPhone }),
+      });
+      if (response.status === 401) {
+        onSessionExpired?.();
+        return;
+      }
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || 'Không gửi được SMS.');
+      setSmsFeedback({
+        success: true,
+        message: `Twilio đã nhận yêu cầu gửi tới ${result.recipient}. Kiểm tra mục Logs để xem trạng thái phát tin.`,
+      });
+    } catch (sendError) {
+      setSmsFeedback({
+        success: false,
+        message: sendError instanceof Error ? sendError.message : 'Gửi SMS thất bại.',
+      });
+    } finally {
+      setSendingSms(false);
+    }
+  }
+
+  function selectRecipient(phone: string) {
+    setRecipientPhone(phone);
+    setSmsFeedback(null);
+    document.getElementById('sms-recipient')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 
   const visibleUsers = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('vi');
@@ -118,39 +137,54 @@ export default function AdminUsersTab({ onSessionExpired }: Props) {
         </div>
       </section>
 
-      <section className={`rounded-2xl border p-4 ${smsStatus?.ready ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}`}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <p className={`text-sm font-semibold ${smsStatus?.ready ? 'text-emerald-800' : 'text-amber-900'}`}>
-              {smsStatus?.ready ? 'SMS nhắc nợ đã sẵn sàng' : 'SMS nhắc nợ chưa được bật'}
-            </p>
-            <p className={`mt-1 text-xs leading-relaxed ${smsStatus?.ready ? 'text-emerald-800/80' : 'text-amber-900/80'}`}>
-              {smsStatus?.ready
-                ? `Hệ thống tự nhắn ${smsStatus.schedule.toLowerCase()} khi phòng có hóa đơn chưa thanh toán từ 3 tháng trở lên.`
-                : 'Để bật, đặt SMS_ENABLED=true và điền tài khoản Twilio trong backend/.env. Tin nhắn chỉ gửi khi dịch vụ đã cấu hình đầy đủ.'}
-            </p>
-            {smsStatus?.ready && (
-              <p className="mt-1 text-xs text-emerald-800/80">Mỗi phòng chỉ nhận tối đa một tin nhắc nợ trong tháng.</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={sendOverdueReminders}
-            disabled={!smsStatus?.ready || sendingSms}
-            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0068FF] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
-          >
-            {sendingSms ? <LoaderCircle size={16} className="animate-spin" /> : <Send size={16} />}
-            {sendingSms ? 'Đang gửi…' : 'Gửi nhắc nợ ngay'}
-          </button>
+      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold text-[#141415]">Thông tin SMS</h2>
+        <p className="mt-1 text-xs text-gray-500">
+          {trialMode
+            ? 'Tài khoản Trial gửi mẫu Appointment Reminders tới số đã xác minh; để gửi nội dung riêng cần nâng cấp Twilio.'
+            : 'Nhập số nhận hoặc bấm số điện thoại người thuê bên dưới để điền nhanh. Nội dung SMS được tạo sẵn.'}
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <label className="text-xs text-gray-600">
+            Số nhận (To)
+            <input
+              id="sms-recipient"
+              type="tel"
+              autoComplete="tel"
+              placeholder="09xxxxxxxx hoặc +849xxxxxxxx"
+              value={recipientPhone}
+              onChange={event => setRecipientPhone(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-[#0068FF]"
+            />
+          </label>
+          <label className="text-xs text-gray-600">
+            Số gửi (From)
+            <input
+              type="text"
+              readOnly
+              placeholder={trialMode ? 'Twilio tự chọn số gửi cho số nhận' : 'Số Twilio đã cấu hình'}
+              value={senderPhone}
+              className="mt-1 w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm outline-none"
+            />
+          </label>
         </div>
-        {smsResult && !smsError && (
-          <p role="status" className={`mt-3 text-sm ${smsResult.failed ? 'text-amber-800' : 'text-emerald-800'}`}>
-            {smsResult.sent === 0 && smsResult.skipped === 0 && smsResult.failed === 0
-              ? 'Hiện không có phòng nào đủ điều kiện nhận nhắc nợ.'
-              : `Đã gửi ${smsResult.sent} tin, bỏ qua ${smsResult.skipped} phòng, lỗi ${smsResult.failed} tin.`}
+        <button
+          type="button"
+          onClick={sendSms}
+          disabled={!smsReady || sendingSms || !recipientPhone.trim()}
+          className="mt-3 inline-flex h-[42px] items-center justify-center gap-2 rounded-lg bg-[#0068FF] px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+        >
+          {sendingSms ? <LoaderCircle size={15} className="animate-spin" /> : <Send size={15} />}
+          {sendingSms ? 'Đang gửi…' : 'Gửi SMS'}
+        </button>
+        {!smsReady && smsIssues.length > 0 && (
+          <p className="mt-2 text-xs text-amber-700">{smsIssues.join(' ')}</p>
+        )}
+        {smsFeedback && (
+          <p role={smsFeedback.success ? 'status' : 'alert'} className={`mt-2 text-xs ${smsFeedback.success ? 'text-emerald-700' : 'text-rose-700'}`}>
+            {smsFeedback.message}
           </p>
         )}
-        {smsError && <p role="alert" className="mt-3 text-sm text-rose-700">{smsError}</p>}
       </section>
 
       <section className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
@@ -192,9 +226,14 @@ export default function AdminUsersTab({ onSessionExpired }: Props) {
                   <td className="px-4 py-3 text-gray-600">{user.ma_phong || '—'}</td>
                   <td className="px-4 py-3">
                     {user.so_dien_thoai ? (
-                      <a className="inline-flex items-center gap-1.5 text-[#0068FF] hover:underline" href={`tel:${user.so_dien_thoai}`}>
+                      <button
+                        type="button"
+                        title="Bấm để điền số này vào ô nhận SMS"
+                        onClick={() => selectRecipient(user.so_dien_thoai!)}
+                        className="inline-flex items-center gap-1.5 text-[#0068FF] hover:underline"
+                      >
                         <Phone size={13} />{user.so_dien_thoai}
-                      </a>
+                      </button>
                     ) : <span className="text-gray-400">—</span>}
                   </td>
                   <td className="max-w-[240px] px-4 py-3 text-xs text-gray-500">

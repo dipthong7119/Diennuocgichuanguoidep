@@ -39,7 +39,7 @@ def seed():
         # ── 2. Tạo hộ gia đình ───────────────────────────────────────────────
         if not db.query(HoGiaDinh).first():
             db.add_all([
-                HoGiaDinh(MaHo="HO-001", TenChuHo="Nguyễn Văn An", SoDienThoai="0901234567", MaPhong="P101",
+                HoGiaDinh(MaHo="HO-001", TenChuHo="Nguyễn Văn An", SoDienThoai="0923640032", MaPhong="P101",
                           DiaChi="12 Nguyễn Trãi, Q.1, TP.HCM", GioiTinh="Nam"),
                 HoGiaDinh(MaHo="HO-002", TenChuHo="Trần Thị Bình", SoDienThoai="0912345678", MaPhong="P102",
                           DiaChi="45 Lê Lợi, Q.3, TP.HCM", GioiTinh="Nữ"),
@@ -51,6 +51,12 @@ def seed():
                           DiaChi="56 Phạm Ngọc Thạch, Q.3, TP.HCM", GioiTinh="Nam"),
             ])
             print("[+] Đã tạo 5 hộ gia đình")
+
+        # Dùng số đã xác minh cho user1 trong dữ liệu mẫu.
+        first_test_household = db.query(HoGiaDinh).filter(HoGiaDinh.MaHo == "HO-001").first()
+        if first_test_household and first_test_household.SoDienThoai != "0923640032":
+            first_test_household.SoDienThoai = "0923640032"
+            db.commit()
 
         # ── 3. Tạo đồng hồ ──────────────────────────────────────────────────
         if not db.query(DongHo).first():

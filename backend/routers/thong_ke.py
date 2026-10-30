@@ -7,15 +7,20 @@ Phân quyền:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
 
 from database import get_db, HoaDon, HoGiaDinh, DongHo, ChiSoTieuThu
 from routers.auth import require_login, require_admin
-from services.nhac_no import send_overdue_reminders, sms_configuration
+from services.nhac_no import SmsProviderError, send_overdue_reminders, send_single_sms, sms_configuration
 
 router = APIRouter(prefix="/thong-ke", tags=["Thống Kê"])
+
+
+class SmsOneRequest(BaseModel):
+    to_phone: str = Field(min_length=8, max_length=30)
 
 
 @router.get("/tong-quan", summary="Thống kê tổng quan dashboard")
@@ -326,6 +331,20 @@ def trang_thai_nhac_no(
     current_user: dict = Depends(require_admin),
 ):
     return sms_configuration()
+
+
+@router.post("/nhac-no/gui-mot", summary="Gửi SMS tới một số (chỉ admin)")
+def gui_mot_sms(
+    payload: SmsOneRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Gửi một SMS tới số nhập; nội dung thử không do người dùng nhập."""
+    try:
+        return send_single_sms(payload.to_phone)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except SmsProviderError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.post("/nhac-no/gui-ngay", summary="Gửi SMS nhắc nợ ngay (chỉ admin)")

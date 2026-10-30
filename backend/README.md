@@ -29,9 +29,11 @@ Chatbot hỏi-đáp hỗ trợ cả kiến thức chung (mẹo tiết kiệm, th
 
 8. SMS nhắc nợ quá hạn
 - Hệ thống kiểm tra mỗi ngày lúc 09:00 theo giờ Việt Nam.
+- Quản trị viên có thể gửi một SMS tới số đang nhập bằng `POST /thong-ke/nhac-no/gui-mot`; API chỉ nhận số điện thoại, nội dung được tạo sẵn.
+- Với Twilio Trial, API dùng mẫu `sms_appointment_reminders` và chỉ gửi được tới số đã xác minh. Tài khoản Trial không hỗ trợ nội dung SMS tùy chỉnh.
 - Gửi tối đa một SMS cho mỗi phòng trong một tháng nếu phòng còn hóa đơn chưa thanh toán từ 3 tháng trở lên.
-- Quản trị viên có thể bấm **Gửi nhắc nợ ngay** trong mục Danh sách người dùng; API tương ứng là `POST /thong-ke/nhac-no/gui-ngay`.
-- Sao chép .env.example thành .env, đặt SMS_ENABLED=true và điền TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER.
+- Lịch nhắc nợ tự động mặc định tắt. Chỉ bật sau khi thay toàn bộ số mẫu bằng số người nhận thật, hoàn tất cấu hình Twilio và được phép liên hệ bằng cách đặt `TWILIO_BULK_REMINDERS_ENABLED=true`.
+- Sao chép .env.example thành .env, đặt SMS_ENABLED=true và điền TWILIO_ACCOUNT_SID, TWILIO_FROM_NUMBER cùng TWILIO_AUTH_TOKEN hoặc cặp TWILIO_API_KEY_SID/TWILIO_API_KEY_SECRET. Nếu khai báo cả hai cách, TWILIO_AUTH_TOKEN được ưu tiên.
 - Số điện thoại Việt Nam lưu dạng 0xxxxxxxxx sẽ được chuyển sang +84 khi gửi. Chỉ gửi được khi tài khoản Twilio và số gửi đã hoạt động.
 
 9. Dữ liệu mẫu năm 2026

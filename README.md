@@ -88,7 +88,7 @@ Dữ liệu được lưu trong SQLite tại `backend/database.db`. Không xóa 
 ## Cấu hình AI và SMS (tùy chọn)
 
 - **AI:** đặt `AI_PROVIDER=gemini` và `GEMINI_API_KEY`, hoặc đặt `AI_PROVIDER=openai` và `OPENAI_API_KEY`. Khi dùng OpenAI, cài thêm `py -m pip install openai`.
-- **SMS:** đặt `SMS_ENABLED=true` và điền `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`. SMS nhắc các phòng có hóa đơn quá hạn từ 3 tháng; quản trị viên có thể gửi thủ công trong trang Danh sách người dùng. Cấu hình Twilio phải hoạt động mới gửi được tin thật.
+- **SMS:** đặt `SMS_ENABLED=true`, điền `TWILIO_ACCOUNT_SID`, `TWILIO_FROM_NUMBER` và một trong hai cách xác thực: `TWILIO_AUTH_TOKEN` hoặc cặp `TWILIO_API_KEY_SID`/`TWILIO_API_KEY_SECRET`. Lịch nhắc nợ tự động tắt mặc định; chỉ bật khi đã thay toàn bộ số mẫu bằng số thật, hoàn tất cấu hình Twilio và được phép liên hệ bằng `TWILIO_BULK_REMINDERS_ENABLED=true`. Với Việt Nam, dùng Sender ID đã đăng ký; nội dung tùy chỉnh yêu cầu tài khoản đã nâng cấp.
 - Khởi động lại backend sau khi sửa `backend/.env`.
 
 ## Cấu trúc thư mục
